@@ -84,7 +84,7 @@ export const LogLine = memo(function LogLine({
   const columnMarker =
     highlightColumn !== null && highlightColumn >= 0 && highlightColumn < displayText.length ? (
       <span
-        className="pointer-events-none absolute bg-primary/20"
+        className="pointer-events-none absolute bg-primary/15"
         style={{
           left: `${gutterWidth + highlightColumn * charWidth}px`,
           width: `${charWidth}px`,
@@ -98,8 +98,8 @@ export const LogLine = memo(function LogLine({
     <div
       ref={ref}
       className={cn(
-        'relative flex w-full items-start border-b border-border/30 px-2 hover:bg-accent/30',
-        isCurrentMatchLine && 'bg-accent/50'
+        'group relative flex w-full items-start border-b border-border/30 px-2 text-foreground',
+        isCurrentMatchLine ? 'bg-primary/10' : 'hover:bg-accent/40'
       )}
       style={{
         minHeight: rowHeight,
@@ -109,9 +109,14 @@ export const LogLine = memo(function LogLine({
       }}
     >
       {columnMarker}
-      <span className="mr-3 w-16 shrink-0 select-none text-right text-muted-foreground tabular-nums">
+
+      <span
+        className="mr-2 shrink-0 select-none border-r border-border/40 pr-2 text-right tabular-nums text-muted-foreground"
+        style={{ width: gutterWidth, minWidth: gutterWidth, fontSize: fontSize * 0.85 }}
+      >
         {lineNumber + 1}
       </span>
+
       <span
         className={cn(
           'min-w-0 flex-1',
