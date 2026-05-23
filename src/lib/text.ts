@@ -31,7 +31,19 @@ export function estimateWrappedRows(text: string, charsPerRow: number): number {
   return rows
 }
 
-/** Classify line for minimap coloring */
+/** Filter tab-delimited columns by hiding selected indices */
+export function filterHiddenColumns(
+  text: string,
+  delimiter: 'tab' | 'comma' | 'pipe',
+  hiddenColumns: number[]
+): string {
+  if (hiddenColumns.length === 0) return text
+  const char = delimiter === 'tab' ? '\t' : delimiter === 'comma' ? ',' : '|'
+  const parts = text.split(char)
+  const hidden = new Set(hiddenColumns)
+  return parts.filter((_, i) => !hidden.has(i)).join(char)
+}
+
 export function classifyLineKind(text: string): 'normal' | 'warn' | 'error' {
   const upper = text.toUpperCase()
   if (upper.includes('ERROR')) return 'error'
