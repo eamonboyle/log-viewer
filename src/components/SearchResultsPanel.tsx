@@ -76,12 +76,12 @@ export function SearchResultsPanel() {
   if (!showResultsPanel || !query.trim() || matches.length === 0) return null
 
   return (
-    <div className="absolute bottom-0 left-0 z-20 flex max-h-48 w-80 flex-col border border-border bg-card shadow-lg">
-      <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
-        <span>{matches.length.toLocaleString()} matches</span>
+    <div className="absolute bottom-0 left-0 z-20 flex max-h-48 w-80 flex-col border border-border bg-card shadow-xl shadow-black/20">
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+        <span className="font-medium">{matches.length.toLocaleString()} matches</span>
         <button
           type="button"
-          className="hover:text-foreground"
+          className="rounded px-1.5 py-0.5 transition-colors hover:bg-accent hover:text-foreground"
           onClick={() => useSearchStore.setState({ showResultsPanel: false })}
         >
           Hide
@@ -93,15 +93,15 @@ export function SearchResultsPanel() {
             <button
               type="button"
               className={cn(
-                'flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-accent/50',
-                index === currentIndex && 'bg-accent/60'
+                'flex w-full flex-col gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-accent/60',
+                index === currentIndex && 'bg-accent/80'
               )}
               onClick={() => goToMatchIndex(index)}
             >
-              <span className="font-medium tabular-nums text-muted-foreground">
+              <span className="tabular-nums text-muted-foreground/70">
                 Line {match.lineNumber + 1}:{match.column + 1}
               </span>
-              <span className="truncate font-mono">{preview}</span>
+              <span className="truncate font-mono text-[11px]">{preview}</span>
             </button>
           </li>
         ))}

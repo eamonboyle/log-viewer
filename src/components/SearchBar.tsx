@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
+import { Search, ChevronDown, ChevronUp, X, List } from 'lucide-react'
 import { useSearchStore } from '@/stores/searchStore'
 import { cn } from '@/lib/utils'
 
@@ -68,108 +66,128 @@ export function SearchBar() {
 
   if (!isOpen) return null
 
+  const hasQuery = query.trim().length > 0
+  const noResults = hasQuery && total === 0 && !searching
+
   const matchLabel = error
-    ? 'Search failed'
+    ? 'error'
     : total === 0
-      ? query.trim()
-        ? 'No matches'
+      ? hasQuery
+        ? 'no matches'
         : ''
       : stale
-        ? `${currentIndex + 1} of ${total} (stale)`
-        : `${currentIndex + 1} of ${total}`
+        ? `${currentIndex + 1}/${total} ·`
+        : `${currentIndex + 1}/${total}`
 
   return (
-    <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-      <input
-        ref={inputRef}
-        type="text"
-        value={query}
-        onChange={(e) => handleQueryChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Find in file…"
-        className="w-56 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        spellCheck={false}
-      />
+    <div className="absolute right-3 top-3 z-20 flex items-center rounded-lg border border-border bg-card shadow-2xl shadow-black/30">
+      {/* Search icon + input */}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => handleQueryChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Find in file…"
+          className="w-48 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+          spellCheck={false}
+        />
+      </div>
 
+      {/* Match count */}
       <span
         className={cn(
-          'min-w-[5.5rem] text-xs tabular-nums',
-          error || (total === 0 && query.trim()) ? 'text-destructive' : 'text-muted-foreground',
-          stale && !error && 'text-yellow-500'
+          'min-w-[4.5rem] shrink-0 text-center text-xs tabular-nums',
+          error || noResults ? 'text-destructive' : stale ? 'text-amber-400' : 'text-muted-foreground'
         )}
         title={error ?? undefined}
       >
-        {searching ? 'Searching…' : matchLabel}
+        {searching ? '…' : matchLabel}
       </span>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 w-7 p-0"
-        disabled={total === 0 || searching}
-        onClick={() => void prevMatch()}
-        title="Previous match (Shift+Enter)"
-      >
-        <ChevronUp className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 w-7 p-0"
-        disabled={total === 0 || searching}
-        onClick={() => void nextMatch()}
-        title="Next match (Enter)"
-      >
-        <ChevronDown className="h-4 w-4" />
-      </Button>
+      <div className="h-5 w-px bg-border" />
 
-      <div className="mx-1 h-5 w-px bg-border" />
+      {/* Navigation */}
+      <div className="flex items-center">
+        <button
+          type="button"
+          className="p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+          disabled={total === 0 || searching}
+          onClick={() => void prevMatch()}
+          title="Previous (Shift+Enter)"
+        >
+          <ChevronUp className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          className="p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+          disabled={total === 0 || searching}
+          onClick={() => void nextMatch()}
+          title="Next (Enter)"
+        >
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+      </div>
 
-      <label className="flex items-center gap-1 text-xs text-muted-foreground" title="Case sensitive">
-        <Switch
-          checked={options.caseSensitive}
-          onCheckedChange={(checked) => {
-            setOptions({ caseSensitive: checked })
-            if (query.trim()) void runSearch()
-          }}
-        />
-        Aa
-      </label>
-      <label className="flex items-center gap-1 text-xs text-muted-foreground" title="Regex">
-        <Switch
-          checked={options.isRegex}
-          onCheckedChange={(checked) => {
-            setOptions({ isRegex: checked })
-            if (query.trim()) void runSearch()
-          }}
-        />
-        .*
-      </label>
-      <label className="flex items-center gap-1 text-xs text-muted-foreground" title="Whole word">
-        <Switch
-          checked={options.wholeWord}
-          onCheckedChange={(checked) => {
-            setOptions({ wholeWord: checked })
-            if (query.trim()) void runSearch()
-          }}
-        />
-        W
-      </label>
+      <div className="h-5 w-px bg-border" />
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs"
+      {/* Options: Aa / .* / W */}
+      <div className="flex items-center gap-px px-1">
+        {[
+          { key: 'caseSensitive' as const, label: 'Aa', title: 'Case sensitive' },
+          { key: 'isRegex' as const, label: '.*', title: 'Regular expression' },
+          { key: 'wholeWord' as const, label: 'W', title: 'Whole word' }
+        ].map(({ key, label, title }) => (
+          <button
+            key={key}
+            type="button"
+            title={title}
+            onClick={() => {
+              setOptions({ [key]: !options[key] })
+              if (query.trim()) void runSearch()
+            }}
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded text-xs font-medium transition-colors',
+              options[key]
+                ? 'bg-primary/20 text-primary'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="h-5 w-px bg-border" />
+
+      {/* Results list toggle */}
+      <button
+        type="button"
+        className={cn(
+          'mx-1 rounded p-1.5 transition-colors',
+          showResultsPanel
+            ? 'text-primary'
+            : 'text-muted-foreground hover:text-foreground',
+          total === 0 && 'opacity-30 pointer-events-none'
+        )}
         disabled={total === 0}
         onClick={toggleResultsPanel}
-        title="Toggle results list"
+        title="Results list"
       >
-        {showResultsPanel ? 'List ▾' : 'List ▸'}
-      </Button>
+        <List className="h-3.5 w-3.5" />
+      </button>
 
-      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={close} title="Close (Esc)">
-        <X className="h-4 w-4" />
-      </Button>
+      {/* Close */}
+      <button
+        type="button"
+        className="mr-1 rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+        onClick={close}
+        title="Close (Esc)"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
     </div>
   )
 }
