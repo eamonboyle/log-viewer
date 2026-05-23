@@ -1,24 +1,85 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { IPC_EVENT } from '@shared/ipc'
 import type { TailAppendedPayload, IndexProgressPayload, FileErrorPayload } from '@shared/types'
 import { useGoToLineStore } from '@/stores/goToLineStore'
 import { useSearchStore } from '@/stores/searchStore'
 import { useTabStore } from '@/stores/tabStore'
 
+type PendingTail = {
+  lines: TailAppendedPayload['lines']['lines']
+  progress?: IndexProgressPayload
+}
+
+/** Coalesce tail IPC events into one store update per animation frame */
+function useBatchedTailUpdates(): {
+  queueAppend: (sessionId: string, payload: TailAppendedPayload) => void
+  queueProgress: (sessionId: string, payload: IndexProgressPayload) => void
+} {
+  const pendingRef = useRef<Map<string, PendingTail>>(new Map())
+  const rafRef = useRef<number | null>(null)
+
+  const flush = useRef(() => {
+    rafRef.current = null
+    const pending = pendingRef.current
+    pendingRef.current = new Map()
+    const applyTailBatch = useTabStore.getState().applyTailBatch
+
+    for (const [sessionId, batch] of pending) {
+      applyTailBatch(
+        sessionId,
+        batch.lines,
+        batch.progress
+          ? {
+              lineCount: batch.progress.lineCount,
+              percent: batch.progress.percent,
+              complete: batch.progress.complete
+            }
+          : undefined
+      )
+    }
+  })
+
+  const scheduleFlush = useRef(() => {
+    if (rafRef.current !== null) return
+    rafRef.current = requestAnimationFrame(flush.current)
+  })
+
+  useEffect(
+    () => () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    },
+    []
+  )
+
+  return {
+    queueAppend: (sessionId, payload) => {
+      const map = pendingRef.current
+      const existing = map.get(sessionId) ?? { lines: [] }
+      existing.lines = existing.lines.concat(payload.lines.lines)
+      map.set(sessionId, existing)
+      scheduleFlush.current()
+    },
+    queueProgress: (sessionId, payload) => {
+      const map = pendingRef.current
+      const existing = map.get(sessionId) ?? { lines: [] }
+      existing.progress = payload
+      map.set(sessionId, existing)
+      scheduleFlush.current()
+    }
+  }
+}
+
 export function useTailEvents(): void {
-  const appendLines = useTabStore((s) => s.appendLines)
-  const updateProgress = useTabStore((s) => s.updateProgress)
   const setError = useTabStore((s) => s.setError)
+  const { queueAppend, queueProgress } = useBatchedTailUpdates()
 
   useEffect(() => {
     const unsubs = [
       window.logViewer.on(IPC_EVENT.TAIL_APPENDED, (sessionId, payload) => {
-        const p = payload as TailAppendedPayload
-        appendLines(sessionId, p.lines.lines)
+        queueAppend(sessionId, payload as TailAppendedPayload)
       }),
       window.logViewer.on(IPC_EVENT.INDEX_PROGRESS, (sessionId, payload) => {
-        const p = payload as IndexProgressPayload
-        updateProgress(sessionId, p.lineCount, p.percent, p.complete)
+        queueProgress(sessionId, payload as IndexProgressPayload)
       }),
       window.logViewer.on(IPC_EVENT.FILE_ERROR, (sessionId, payload) => {
         const p = payload as FileErrorPayload
@@ -33,7 +94,7 @@ export function useTailEvents(): void {
     ]
 
     return () => unsubs.forEach((u) => u())
-  }, [appendLines, updateProgress, setError])
+  }, [queueAppend, queueProgress, setError])
 }
 
 export function useMenuShortcuts(): void {

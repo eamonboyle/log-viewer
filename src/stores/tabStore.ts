@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { IPC_INVOKE } from '@shared/ipc'
-import type { AppSettings, HighlightRule, HighlightedLine, LogLine } from '@shared/types'
+import type { AppSettings, ColumnLayout, HighlightRule, HighlightedLine, LogLine } from '@shared/types'
 
 export interface TabSession {
   id: string
@@ -22,6 +22,12 @@ export interface TabSession {
   scrollTargetLine: number | null
   /** Column to scroll/highlight (0-based); consumed by LogViewport */
   scrollTargetColumn: number | null
+  /** Scroll alignment when scrollTargetLine is set */
+  scrollTargetAlign: 'start' | 'center' | 'end' | null
+  /** Detected column layout for tab-delimited files */
+  columnLayout: ColumnLayout | null
+  /** 0-based column indices hidden in display */
+  hiddenColumns: number[]
 }
 
 interface TabStore {
@@ -35,6 +41,7 @@ interface TabStore {
   openFileDialog: () => Promise<void>
   openFileDialogInNewTab: () => Promise<void>
   closeTab: (tabId: string) => Promise<void>
+  reorderTabs: (fromIndex: number, toIndex: number) => void
   setActiveTab: (tabId: string) => void
   setFollow: (tabId: string, enabled: boolean) => Promise<void>
   toggleFollow: (tabId: string) => Promise<void>
@@ -46,14 +53,40 @@ interface TabStore {
   getLine: (tabId: string, lineNumber: number) => string | undefined
   getActiveTab: () => TabSession | undefined
   updateHighlightRules: (rules: HighlightRule[]) => Promise<void>
-  scrollToLine: (tabId: string, lineNumber: number, column?: number) => void
-  consumeScrollTarget: (tabId: string) => { line: number; column: number | null } | null
+  scrollToLine: (tabId: string, lineNumber: number, column?: number, align?: 'start' | 'center' | 'end') => void
+  scrollToTail: (tabId: string) => void
+  consumeScrollTarget: (tabId: string) => { line: number; column: number | null; align: 'start' | 'center' | 'end' } | null
   gotoLine: (tabId: string, lineOneBased: number, columnOneBased?: number) => void
+  detectColumns: (tabId: string) => Promise<void>
+  toggleColumnVisibility: (tabId: string, columnIndex: number) => void
+  applyTheme: (theme: AppSettings['theme']) => void
+  applyTailBatch: (
+    sessionId: string,
+    lines: LogLine[],
+    progress?: { lineCount: number; percent: number; complete: boolean }
+  ) => void
 }
 
 function makeDisplayName(path: string): string {
   const parts = path.replace(/\\/g, '/').split('/')
   return parts[parts.length - 1] || path
+}
+
+function applyThemeToDocument(theme: AppSettings['theme']): void {
+  document.documentElement.dataset.theme = theme
+}
+
+async function detectColumnsForTab(tabId: string, sessionId: string, set: StoreApi<TabStore>['setState']): Promise<void> {
+  try {
+    const layout = await window.logViewer.invoke(IPC_INVOKE.COLUMN_DETECT, sessionId)
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === tabId ? { ...t, columnLayout: layout, hiddenColumns: [] } : t
+      )
+    }))
+  } catch {
+    // column detection is optional
+  }
 }
 
 async function createTabFromPath(
@@ -75,8 +108,11 @@ async function createTabFromPath(
     indexComplete: false,
     error: null,
     lineCache: new Map(),
-    scrollTargetLine: null,
-    scrollTargetColumn: null
+    scrollTargetLine: result.lineCount > 0 ? result.lineCount - 1 : null,
+    scrollTargetColumn: null,
+    scrollTargetAlign: result.lineCount > 0 ? 'end' : null,
+    columnLayout: null,
+    hiddenColumns: []
   }
 
   set((s) => ({
@@ -85,6 +121,7 @@ async function createTabFromPath(
   }))
 
   await window.logViewer.invoke(IPC_INVOKE.TAIL_SET_FOLLOW, result.sessionId, true)
+  void detectColumnsForTab(tab.id, result.sessionId, set)
 }
 
 export const useTabStore = create<TabStore>((set, get) => ({
@@ -94,6 +131,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
 
   loadSettings: async () => {
     const settings = await window.logViewer.invoke(IPC_INVOKE.SETTINGS_GET)
+    applyThemeToDocument(settings.theme)
     set({ settings })
   },
 
@@ -101,6 +139,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
     const existing = get().tabs.find((t) => t.path === path)
     if (existing) {
       set({ activeTabId: existing.id })
+      if (existing.followPinned) get().scrollToTail(existing.id)
       return
     }
 
@@ -137,6 +176,17 @@ export const useTabStore = create<TabStore>((set, get) => ({
     })
   },
 
+  reorderTabs: (fromIndex, toIndex) => {
+    set((s) => {
+      if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return s
+      if (fromIndex >= s.tabs.length || toIndex >= s.tabs.length) return s
+      const tabs = [...s.tabs]
+      const [moved] = tabs.splice(fromIndex, 1)
+      tabs.splice(toIndex, 0, moved)
+      return { tabs }
+    })
+  },
+
   setActiveTab: (tabId: string) => set({ activeTabId: tabId }),
 
   setFollow: async (tabId: string, enabled: boolean) => {
@@ -149,6 +199,10 @@ export const useTabStore = create<TabStore>((set, get) => ({
         t.id === tabId ? { ...t, followEnabled: enabled, followPinned: enabled, hasUnread: enabled ? false : t.hasUnread } : t
       )
     }))
+
+    if (enabled) {
+      get().scrollToTail(tabId)
+    }
   },
 
   toggleFollow: async (tabId: string) => {
@@ -173,10 +227,12 @@ export const useTabStore = create<TabStore>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId)
     if (tab && pinned) {
       void window.logViewer.invoke(IPC_INVOKE.TAIL_SET_FOLLOW, tab.sessionId, true)
+      get().scrollToTail(tabId)
     }
   },
 
   appendLines: (sessionId: string, lines: LogLine[]) => {
+    if (lines.length === 0) return
     set((s) => ({
       tabs: s.tabs.map((t) => {
         if (t.sessionId !== sessionId) return t
@@ -187,6 +243,43 @@ export const useTabStore = create<TabStore>((set, get) => ({
         const newLineCount = Math.max(t.lineCount, ...lines.map((l) => l.lineNumber + 1))
         const hasUnread = !t.followPinned && lines.length > 0
         return { ...t, lineCache, lineCount: newLineCount, hasUnread: hasUnread || t.hasUnread }
+      })
+    }))
+  },
+
+  /** Apply tail append + index progress in one store update to avoid double-render flicker */
+  applyTailBatch: (
+    sessionId: string,
+    lines: LogLine[],
+    progress?: { lineCount: number; percent: number; complete: boolean }
+  ) => {
+    if (lines.length === 0 && !progress) return
+    set((s) => ({
+      tabs: s.tabs.map((t) => {
+        if (t.sessionId !== sessionId) return t
+        let lineCache = t.lineCache
+        if (lines.length > 0) {
+          lineCache = new Map(t.lineCache)
+          for (const line of lines) {
+            lineCache.set(line.lineNumber, line.text)
+          }
+        }
+        const appendedLineCount =
+          lines.length > 0 ? Math.max(t.lineCount, ...lines.map((l) => l.lineNumber + 1)) : t.lineCount
+        const lineCount = progress ? Math.max(appendedLineCount, progress.lineCount) : appendedLineCount
+        const hasUnread = !t.followPinned && lines.length > 0
+        return {
+          ...t,
+          lineCache,
+          lineCount,
+          hasUnread: hasUnread || t.hasUnread,
+          ...(progress
+            ? {
+                indexPercent: progress.percent,
+                indexComplete: progress.complete
+              }
+            : {})
+        }
       })
     }))
   },
@@ -235,28 +328,37 @@ export const useTabStore = create<TabStore>((set, get) => ({
     set({ settings })
   },
 
-  scrollToLine: (tabId, lineNumber, column) => {
+  scrollToLine: (tabId, lineNumber, column, align = 'center') => {
     set((s) => ({
       tabs: s.tabs.map((t) =>
         t.id === tabId
-          ? { ...t, scrollTargetLine: lineNumber, scrollTargetColumn: column ?? null }
+          ? { ...t, scrollTargetLine: lineNumber, scrollTargetColumn: column ?? null, scrollTargetAlign: align }
           : t
       )
     }))
+  },
+
+  scrollToTail: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId)
+    if (!tab || tab.lineCount <= 0) return
+    get().scrollToLine(tabId, tab.lineCount - 1, undefined, 'end')
   },
 
   consumeScrollTarget: (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId)
     const line = tab?.scrollTargetLine ?? null
     const column = tab?.scrollTargetColumn ?? null
+    const align = tab?.scrollTargetAlign ?? 'center'
     if (line !== null) {
       set((s) => ({
         tabs: s.tabs.map((t) =>
-          t.id === tabId ? { ...t, scrollTargetLine: null, scrollTargetColumn: null } : t
+          t.id === tabId
+            ? { ...t, scrollTargetLine: null, scrollTargetColumn: null, scrollTargetAlign: null }
+            : t
         )
       }))
     }
-    return line !== null ? { line, column } : null
+    return line !== null ? { line, column, align } : null
   },
 
   gotoLine: (tabId, lineOneBased, columnOneBased) => {
@@ -272,6 +374,28 @@ export const useTabStore = create<TabStore>((set, get) => ({
     }
 
     get().scrollToLine(tabId, lineNumber, column)
+  },
+
+  detectColumns: async (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId)
+    if (!tab) return
+    await detectColumnsForTab(tabId, tab.sessionId, set)
+  },
+
+  toggleColumnVisibility: (tabId, columnIndex) => {
+    set((s) => ({
+      tabs: s.tabs.map((t) => {
+        if (t.id !== tabId) return t
+        const hidden = new Set(t.hiddenColumns)
+        if (hidden.has(columnIndex)) hidden.delete(columnIndex)
+        else hidden.add(columnIndex)
+        return { ...t, hiddenColumns: [...hidden].sort((a, b) => a - b) }
+      })
+    }))
+  },
+
+  applyTheme: (theme) => {
+    applyThemeToDocument(theme)
   }
 }))
 
