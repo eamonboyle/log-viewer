@@ -1,12 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import { basename } from 'path'
-import { join } from 'path'
 import type ElectronStore from 'electron-store'
 import { IPC_EVENT, IPC_INVOKE } from '@shared/ipc'
-import { DEFAULT_SETTINGS, type AppSettings, type SearchOptions, type SettingsExportPayload } from '@shared/types'
+import {
+  DEFAULT_SETTINGS,
+  type AppSettings,
+  type SearchOptions,
+  type SettingsExportPayload
+} from '@shared/types'
 import { SessionManager } from '../services/file-session'
-
-const isDev = !app.isPackaged
+import { detectColumnLayout } from '../services/column-detector'
+import { windowManager } from './window-manager'
 
 let store: ElectronStore<{ settings: AppSettings }>
 
@@ -15,8 +19,12 @@ async function initStore(): Promise<void> {
   store = new Store({ defaults: { settings: DEFAULT_SETTINGS } })
 }
 
-let mainWindow: BrowserWindow | null = null
 const sessionManager = new SessionManager()
+let checkForUpdatesFn: (() => void) | null = null
+
+export function setCheckForUpdates(fn: () => void): void {
+  checkForUpdatesFn = fn
+}
 
 function getSettings(): AppSettings {
   return store.get('settings', DEFAULT_SETTINGS)
@@ -36,6 +44,11 @@ function addRecentFile(filePath: string): void {
   refreshMenu()
 }
 
+function clearRecentFiles(): void {
+  saveSettings({ recentFiles: [] })
+  refreshMenu()
+}
+
 function formatRecentLabel(filePath: string): string {
   const name = basename(filePath)
   if (filePath.length <= 72) return filePath
@@ -49,7 +62,19 @@ function buildRecentSubmenu(): Electron.MenuItemConstructorOptions[] {
   }
   return recent.map((filePath) => ({
     label: formatRecentLabel(filePath),
-    click: () => mainWindow?.webContents.send('menu:open-path-new-tab', filePath)
+    submenu: [
+      {
+        label: 'Open in Tab',
+        click: () => windowManager.sendToFocusedOrFirst('menu:open-path-new-tab', filePath)
+      },
+      {
+        label: 'Open in New Window',
+        click: () => {
+          const win = windowManager.createWindow()
+          windowManager.sendToWindow(win, 'menu:open-path', filePath)
+        }
+      }
+    ]
   }))
 }
 
@@ -60,41 +85,53 @@ function wireSessionEvents(sessionId: string): void {
   const { tailEngine } = session
 
   tailEngine.on('appended', (payload) => {
-    mainWindow?.webContents.send(IPC_EVENT.TAIL_APPENDED, sessionId, payload)
+    windowManager.sendToSessionOwner(sessionId, IPC_EVENT.TAIL_APPENDED, payload)
   })
 
   tailEngine.on('progress', (payload) => {
-    mainWindow?.webContents.send(IPC_EVENT.INDEX_PROGRESS, sessionId, payload)
+    windowManager.sendToSessionOwner(sessionId, IPC_EVENT.INDEX_PROGRESS, payload)
   })
 
   tailEngine.on('rotated', (payload) => {
-    mainWindow?.webContents.send(IPC_EVENT.FILE_ROTATED, sessionId, payload)
+    windowManager.sendToSessionOwner(sessionId, IPC_EVENT.FILE_ROTATED, payload)
   })
 
   tailEngine.on('error', (payload) => {
-    mainWindow?.webContents.send(IPC_EVENT.FILE_ERROR, sessionId, payload)
+    windowManager.sendToSessionOwner(sessionId, IPC_EVENT.FILE_ERROR, payload)
   })
 
   session.setSearchStaleHandler((sid, fileSize) => {
-    mainWindow?.webContents.send(IPC_EVENT.SEARCH_STALE, sid, { fileSize })
+    windowManager.sendToSessionOwner(sid, IPC_EVENT.SEARCH_STALE, { fileSize })
   })
 }
 
+function registerSessionForEvent(event: Electron.IpcMainInvokeEvent, sessionId: string): void {
+  const windowId = windowManager.getWindowIdFromWebContents(event.sender)
+  if (windowId) {
+    windowManager.registerSession(windowId, sessionId)
+  }
+}
+
 function registerIpcHandlers(): void {
-  ipcMain.handle(IPC_INVOKE.FILE_OPEN, async (_e, filePath: string) => {
+  ipcMain.handle(IPC_INVOKE.FILE_OPEN, async (event, filePath: string) => {
     const settings = getSettings()
     const session = await sessionManager.open(filePath, {
       encodingOverride: settings.encoding,
       usePolling: settings.usePolling,
       pollIntervalMs: settings.pollIntervalMs
     })
+    registerSessionForEvent(event, session.id)
     wireSessionEvents(session.id)
     addRecentFile(filePath)
     return session.start()
   })
 
-  ipcMain.handle(IPC_INVOKE.FILE_CLOSE, async (_e, sessionId: string) => {
-    await sessionManager.close(sessionId)
+  ipcMain.handle(IPC_INVOKE.FILE_CLOSE, async (event, sessionId: string) => {
+    const windowId = windowManager.getWindowIdFromWebContents(event.sender)
+    windowManager.unregisterSession(sessionId, windowId)
+    if (!windowManager.hasSessionOwners(sessionId)) {
+      await sessionManager.close(sessionId)
+    }
   })
 
   ipcMain.handle(IPC_INVOKE.TAIL_SET_FOLLOW, (_e, sessionId: string, enabled: boolean) => {
@@ -113,14 +150,18 @@ function registerIpcHandlers(): void {
     return session.getIndexStatus()
   })
 
-  ipcMain.handle(IPC_INVOKE.DIALOG_OPEN_FILE, async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
+  ipcMain.handle(IPC_INVOKE.DIALOG_OPEN_FILE, async (event) => {
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
       properties: ['openFile'],
       filters: [
         { name: 'Log Files', extensions: ['log', 'txt', 'out'] },
         { name: 'All Files', extensions: ['*'] }
       ]
-    })
+    }
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options)
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
   })
@@ -128,6 +169,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_INVOKE.SETTINGS_GET, () => getSettings())
 
   ipcMain.handle(IPC_INVOKE.SETTINGS_SET, (_e, partial: Partial<AppSettings>) => saveSettings(partial))
+
+  ipcMain.handle(IPC_INVOKE.SETTINGS_CLEAR_RECENT, () => {
+    clearRecentFiles()
+    return getSettings()
+  })
 
   ipcMain.handle(
     IPC_INVOKE.SEARCH_QUERY,
@@ -180,6 +226,13 @@ function registerIpcHandlers(): void {
     if (!session) throw new Error('Session not found')
     return session.getMinimapSamples(maxSamples)
   })
+
+  ipcMain.handle(IPC_INVOKE.COLUMN_DETECT, async (_e, sessionId: string) => {
+    const session = sessionManager.get(sessionId)
+    if (!session) throw new Error('Session not found')
+    const lines = await session.readLines(0, 20)
+    return detectColumnLayout(lines.lines)
+  })
 }
 
 function buildMenu(): void {
@@ -210,21 +263,32 @@ function buildMenu(): void {
         {
           label: 'Open…',
           accelerator: 'CmdOrCtrl+O',
-          click: () => mainWindow?.webContents.send('menu:open-file')
+          click: () => windowManager.sendToFocusedOrFirst('menu:open-file')
         },
         {
           label: 'Open in New Tab…',
           accelerator: 'CmdOrCtrl+Shift+O',
-          click: () => mainWindow?.webContents.send('menu:open-file-new-tab')
+          click: () => windowManager.sendToFocusedOrFirst('menu:open-file-new-tab')
+        },
+        {
+          label: 'Open in New Window',
+          click: () => {
+            windowManager.createWindow()
+          }
         },
         {
           label: 'Open Recent',
           submenu: buildRecentSubmenu()
         },
         {
+          label: 'Clear Recent Files',
+          enabled: getSettings().recentFiles.length > 0,
+          click: () => clearRecentFiles()
+        },
+        {
           label: 'Close Tab',
           accelerator: 'CmdOrCtrl+W',
-          click: () => mainWindow?.webContents.send('menu:close-tab')
+          click: () => windowManager.sendToFocusedOrFirst('menu:close-tab')
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
@@ -236,23 +300,23 @@ function buildMenu(): void {
         {
           label: 'Find…',
           accelerator: 'CmdOrCtrl+F',
-          click: () => mainWindow?.webContents.send('menu:find')
+          click: () => windowManager.sendToFocusedOrFirst('menu:find')
         },
         {
           label: 'Go to Line…',
           accelerator: 'CmdOrCtrl+G',
-          click: () => mainWindow?.webContents.send('menu:goto-line')
+          click: () => windowManager.sendToFocusedOrFirst('menu:goto-line')
         },
         { type: 'separator' },
         {
           label: 'Toggle Follow',
           accelerator: 'F5',
-          click: () => mainWindow?.webContents.send('menu:toggle-follow')
+          click: () => windowManager.sendToFocusedOrFirst('menu:toggle-follow')
         },
         {
           label: 'Jump to End',
           accelerator: 'End',
-          click: () => mainWindow?.webContents.send('menu:jump-end')
+          click: () => windowManager.sendToFocusedOrFirst('menu:jump-end')
         },
         { type: 'separator' },
         { role: 'reload' },
@@ -261,6 +325,15 @@ function buildMenu(): void {
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Check for Updates…',
+          click: () => checkForUpdatesFn?.()
+        }
       ]
     }
   ]
@@ -272,33 +345,15 @@ export function refreshMenu(): void {
   buildMenu()
 }
 
-export function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 600,
-    minHeight: 400,
-    show: false,
-    backgroundColor: '#0a0a0a',
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  })
-
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
-
-  if (isDev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+export function createWindow(): BrowserWindow {
+  return windowManager.createWindow()
 }
 
 export async function bootstrap(): Promise<void> {
   await initStore()
+  windowManager.setSessionOrphanHandler((sessionId) => {
+    void sessionManager.close(sessionId)
+  })
   registerIpcHandlers()
   buildMenu()
   createWindow()
