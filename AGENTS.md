@@ -36,6 +36,10 @@ npm run dist         # build + electron-builder
 
 Do not commit `node_modules/`, `out/`, `release/`, `*.log`, or secrets (`.env`, credentials).
 
+## v1.0.0 milestone
+
+Shipped May 2026. Key additions over MVP: multi-window with session→window IPC routing, search-as-you-type, go-to-column scroll, tab reorder, light theme, per-file highlight globs, tab-delimited column detection, CI/release workflows, and cross-platform packaging with auto-update check.
+
 ## Git commit conventions
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) with optional scope:
