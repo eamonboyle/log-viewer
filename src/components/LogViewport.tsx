@@ -20,6 +20,8 @@ interface LogViewportProps {
 }
 
 const OVERSCAN = 20
+const CHAR_WIDTH_RATIO = 0.6
+const GUTTER_WIDTH = 64
 
 export function LogViewport({ tabId }: LogViewportProps) {
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId))
@@ -33,7 +35,10 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const getCurrentMatch = useSearchStore((s) => s.getCurrentMatch)
 
   const parentRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const followPinnedRef = useRef(tab?.followPinned ?? true)
+  const followScrollRafRef = useRef<number | null>(null)
+  const scrollStateRafRef = useRef<number | null>(null)
   const loadingRef = useRef(new Set<number>())
   const heightCacheRef = useRef(new Map<number, number>())
   const [fetchTick, setFetchTick] = useState(0)
@@ -48,10 +53,17 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const wordWrap = settings?.wordWrap ?? false
   const tabWidth = settings?.tabWidth ?? 4
   const lineCount = tab?.lineCount ?? 0
+  const prevLineCountRef = useRef(0)
   const compressed = isCompressedScroll(lineCount)
   const effectiveRowHeight = getEffectiveRowHeight(lineCount, baseRowHeight)
+  const charWidth = fontSize * CHAR_WIDTH_RATIO
 
   followPinnedRef.current = tab?.followPinned ?? true
+
+  useEffect(() => {
+    const t = useTabStore.getState().tabs.find((x) => x.id === tabId)
+    prevLineCountRef.current = t?.lineCount ?? 0
+  }, [tabId])
 
   const virtualizer = useVirtualizer({
     count: Math.max(lineCount, 1),
@@ -68,40 +80,12 @@ export function LogViewport({ tabId }: LogViewportProps) {
   })
 
   const virtualItems = virtualizer.getVirtualItems()
-  const totalSize = getVirtualTotalSize(lineCount, baseRowHeight)
-
-  const visibleLines = virtualItems
-    .map((vi) => {
-      const text = tab?.lineCache.get(vi.index)
-      return text !== undefined ? { lineNumber: vi.index, text } : null
-    })
-    .filter((l): l is { lineNumber: number; text: string } => l !== null)
-
-  const highlightSegments = useHighlightLines(visibleLines, settings?.highlightRules ?? [])
-
-  const currentMatch = getCurrentMatch()
-  const searchHighlightSegments = useSearchHighlightSegments(
-    virtualItems.map((vi) => vi.index),
-    searchMatches,
-    currentMatch
-  )
-
-  useEffect(() => {
-    heightCacheRef.current.clear()
-    virtualizer.measure()
-  }, [wordWrap, fontSize, settings?.lineHeight, virtualizer])
-
-  useEffect(() => {
-    const target = consumeScrollTarget(tabId)
-    if (target !== null) {
-      virtualizer.scrollToIndex(target.line, { align: 'center' })
-      setHighlightColumn(target.column)
-      setHighlightLine(target.line)
-    }
-  }, [tab?.scrollTargetLine, tabId, consumeScrollTarget, virtualizer])
+  const totalSize = wordWrap
+    ? virtualizer.getTotalSize()
+    : getVirtualTotalSize(lineCount, baseRowHeight)
 
   const fetchLines = useCallback(
-    async (startLine: number, count: number) => {
+    async (startLine: number, count: number): Promise<void> => {
       if (!tab) return
       const key = startLine
       if (loadingRef.current.has(key)) return
@@ -123,6 +107,94 @@ export function LogViewport({ tabId }: LogViewportProps) {
     [tab, tabId, cacheLines]
   )
 
+  const scrollToEnd = useCallback(() => {
+    if (lineCount === 0) return
+
+    const lastLine = lineCount - 1
+    const doScroll = () => {
+      if (wordWrap) virtualizer.measure()
+      if (wordWrap || compressed) {
+        virtualizer.scrollToIndex(lastLine, { align: 'end' })
+      } else {
+        const el = parentRef.current
+        if (el) el.scrollTop = el.scrollHeight - el.clientHeight
+      }
+    }
+
+    if (wordWrap && tab) {
+      const tailStart = Math.max(0, lastLine - OVERSCAN)
+      let missingTail = false
+      for (let i = tailStart; i <= lastLine; i++) {
+        if (!tab.lineCache.has(i)) {
+          missingTail = true
+          break
+        }
+      }
+
+      if (missingTail) {
+        void fetchLines(tailStart, lastLine - tailStart + 1).then(() => {
+          requestAnimationFrame(() => requestAnimationFrame(doScroll))
+        })
+        return
+      }
+    }
+
+    requestAnimationFrame(() => requestAnimationFrame(doScroll))
+  }, [lineCount, wordWrap, compressed, virtualizer, tab, fetchLines])
+
+  const visibleLines = useMemo(
+    () =>
+      virtualItems
+        .map((vi) => {
+          const text = tab?.lineCache.get(vi.index)
+          return text !== undefined ? { lineNumber: vi.index, text } : null
+        })
+        .filter((l): l is { lineNumber: number; text: string } => l !== null),
+    [virtualItems, tab?.lineCache]
+  )
+
+  const highlightSegments = useHighlightLines(visibleLines, settings?.highlightRules ?? [], tab?.path)
+
+  const currentMatch = getCurrentMatch()
+  const searchHighlightSegments = useSearchHighlightSegments(
+    virtualItems.map((vi) => vi.index),
+    searchMatches,
+    currentMatch
+  )
+
+  useEffect(() => {
+    heightCacheRef.current.clear()
+    virtualizer.measure()
+  }, [wordWrap, fontSize, settings?.lineHeight, virtualizer])
+
+  useEffect(() => {
+    const target = consumeScrollTarget(tabId)
+    if (target !== null) {
+      if (target.align === 'end') {
+        scrollToEnd()
+      } else {
+        virtualizer.scrollToIndex(target.line, { align: target.align })
+      }
+
+      setHighlightColumn(target.column)
+      setHighlightLine(target.line)
+
+      if (target.column !== null && parentRef.current && !wordWrap) {
+        const scrollLeft = Math.max(0, GUTTER_WIDTH + target.column * charWidth - parentRef.current.clientWidth / 3)
+        parentRef.current.scrollLeft = scrollLeft
+      }
+    }
+  }, [
+    tab?.scrollTargetLine,
+    tab?.scrollTargetAlign,
+    tabId,
+    consumeScrollTarget,
+    virtualizer,
+    charWidth,
+    wordWrap,
+    scrollToEnd
+  ])
+
   useEffect(() => {
     if (!tab || virtualItems.length === 0) return
     const first = virtualItems[0].index
@@ -141,24 +213,56 @@ export function LogViewport({ tabId }: LogViewportProps) {
   }, [tab, virtualItems, fetchLines, fetchTick])
 
   useEffect(() => {
-    if (!tab?.followPinned || lineCount === 0) return
-    virtualizer.scrollToIndex(lineCount - 1, { align: 'end' })
-  }, [tab?.followPinned, lineCount, tab?.lineCache.size, virtualizer])
+    if (!tab?.followPinned || lineCount === 0) {
+      prevLineCountRef.current = lineCount
+      return
+    }
+
+    const prev = prevLineCountRef.current
+    prevLineCountRef.current = lineCount
+    if (lineCount <= prev) return
+
+    if (followScrollRafRef.current !== null) {
+      cancelAnimationFrame(followScrollRafRef.current)
+    }
+
+    followScrollRafRef.current = requestAnimationFrame(() => {
+      followScrollRafRef.current = null
+      if (!followPinnedRef.current) return
+      scrollToEnd()
+    })
+  }, [tab?.followPinned, lineCount, scrollToEnd])
+
+  useEffect(
+    () => () => {
+      if (followScrollRafRef.current !== null) cancelAnimationFrame(followScrollRafRef.current)
+      if (scrollStateRafRef.current !== null) cancelAnimationFrame(scrollStateRafRef.current)
+    },
+    []
+  )
 
   const handleScroll = useCallback(() => {
     if (!parentRef.current || !tab) return
     const el = parentRef.current
-    setScrollTop(el.scrollTop)
-    setClientHeight(el.clientHeight)
 
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < effectiveRowHeight * 2
+    const atBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight <
+      (wordWrap ? baseRowHeight * 3 : effectiveRowHeight * 2)
 
     if (atBottom && !followPinnedRef.current) {
       setFollowPinned(tabId, true)
     } else if (!atBottom && followPinnedRef.current) {
       setFollowPinned(tabId, false)
     }
-  }, [tab, tabId, effectiveRowHeight, setFollowPinned])
+
+    if (scrollStateRafRef.current !== null) return
+    scrollStateRafRef.current = requestAnimationFrame(() => {
+      scrollStateRafRef.current = null
+      if (!parentRef.current) return
+      setScrollTop(parentRef.current.scrollTop)
+      setClientHeight(parentRef.current.clientHeight)
+    })
+  }, [tab, tabId, effectiveRowHeight, baseRowHeight, wordWrap, setFollowPinned])
 
   useEffect(() => {
     const el = parentRef.current
@@ -175,8 +279,24 @@ export function LogViewport({ tabId }: LogViewportProps) {
       if (prev === height) return
       heightCacheRef.current.set(lineNumber, height)
       virtualizer.resizeItem(lineNumber, height)
+
+      if (
+        followPinnedRef.current &&
+        wordWrap &&
+        lineCount > 0 &&
+        lineNumber >= lineCount - OVERSCAN
+      ) {
+        if (followScrollRafRef.current !== null) {
+          cancelAnimationFrame(followScrollRafRef.current)
+        }
+        followScrollRafRef.current = requestAnimationFrame(() => {
+          followScrollRafRef.current = null
+          if (!followPinnedRef.current) return
+          virtualizer.scrollToIndex(lineCount - 1, { align: 'end' })
+        })
+      }
     },
-    [virtualizer]
+    [virtualizer, wordWrap, lineCount]
   )
 
   const handleScrollbarScroll = useCallback(
@@ -202,6 +322,16 @@ export function LogViewport({ tabId }: LogViewportProps) {
     [compressed, clientHeight]
   )
 
+  const contentMinWidth = useMemo(() => {
+    if (wordWrap || !tab) return '100%'
+    let maxLen = 0
+    for (const vi of virtualItems) {
+      const text = tab.lineCache.get(vi.index) ?? ''
+      maxLen = Math.max(maxLen, text.length)
+    }
+    return `${GUTTER_WIDTH + maxLen * charWidth + 32}px`
+  }, [virtualItems, tab, charWidth, wordWrap])
+
   if (!tab) return null
 
   return (
@@ -213,7 +343,10 @@ export function LogViewport({ tabId }: LogViewportProps) {
           className="h-full overflow-auto bg-background"
           onScroll={handleScroll}
         >
-          <div style={{ height: totalSize, width: '100%', position: 'relative' }}>
+          <div
+            ref={contentRef}
+            style={{ height: totalSize, minWidth: contentMinWidth, width: '100%', position: 'relative' }}
+          >
             {virtualItems.map((vi) => {
               const text = tab.lineCache.get(vi.index) ?? ''
               const ruleSegments = highlightSegments.get(vi.index) ?? []
@@ -233,6 +366,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
                     top: 0,
                     left: 0,
                     width: '100%',
+                    minWidth: contentMinWidth,
                     transform: `translateY(${vi.start}px)`
                   }}
                 >
@@ -247,6 +381,10 @@ export function LogViewport({ tabId }: LogViewportProps) {
                     wordWrap={wordWrap}
                     tabWidth={tabWidth}
                     highlightColumn={colHighlight}
+                    columnLayout={tab.columnLayout}
+                    hiddenColumns={tab.hiddenColumns}
+                    charWidth={charWidth}
+                    gutterWidth={GUTTER_WIDTH}
                     onMeasuredHeight={wordWrap ? handleMeasuredHeight : undefined}
                   />
                 </div>

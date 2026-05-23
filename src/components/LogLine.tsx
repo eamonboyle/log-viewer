@@ -1,6 +1,6 @@
-import { memo, useEffect, useRef } from 'react'
-import type { HighlightSegment } from '@shared/types'
-import { expandTabs } from '@/lib/text'
+import { memo, useEffect, useMemo, useRef } from 'react'
+import type { ColumnLayout, HighlightSegment } from '@shared/types'
+import { expandTabs, filterHiddenColumns } from '@/lib/text'
 import { cn } from '@/lib/utils'
 
 interface LogLineProps {
@@ -14,6 +14,10 @@ interface LogLineProps {
   wordWrap?: boolean
   tabWidth?: number
   highlightColumn?: number | null
+  columnLayout?: ColumnLayout | null
+  hiddenColumns?: number[]
+  charWidth?: number
+  gutterWidth?: number
   onMeasuredHeight?: (lineNumber: number, height: number) => void
 }
 
@@ -54,10 +58,22 @@ export const LogLine = memo(function LogLine({
   wordWrap = false,
   tabWidth = 4,
   highlightColumn = null,
+  columnLayout = null,
+  hiddenColumns = [],
+  charWidth = fontSize * 0.6,
+  gutterWidth = 64,
   onMeasuredHeight
 }: LogLineProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const displayText = expandTabs(text, tabWidth)
+
+  const rawText = useMemo(() => {
+    if (columnLayout && hiddenColumns.length > 0) {
+      return filterHiddenColumns(text, columnLayout.delimiter, hiddenColumns)
+    }
+    return text
+  }, [text, columnLayout, hiddenColumns])
+
+  const displayText = expandTabs(rawText, tabWidth)
 
   useEffect(() => {
     if (!wordWrap || !onMeasuredHeight || !ref.current) return
@@ -70,8 +86,8 @@ export const LogLine = memo(function LogLine({
       <span
         className="pointer-events-none absolute bg-primary/20"
         style={{
-          left: `${64 + highlightColumn * (fontSize * 0.6)}px`,
-          width: `${fontSize * 0.6}px`,
+          left: `${gutterWidth + highlightColumn * charWidth}px`,
+          width: `${charWidth}px`,
           top: 0,
           bottom: 0
         }}
@@ -99,7 +115,7 @@ export const LogLine = memo(function LogLine({
       <span
         className={cn(
           'min-w-0 flex-1',
-          wordWrap ? 'whitespace-pre-wrap break-all' : 'truncate whitespace-pre'
+          wordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
         )}
       >
         {segments.length > 0 ? renderSegments(displayText, segments) : displayText || ' '}
