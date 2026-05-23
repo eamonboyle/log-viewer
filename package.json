@@ -1,6 +1,6 @@
 {
   "name": "log-viewer",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Modern real-time log viewer — watch-first tail engine for multi-GB files",
   "main": "./out/main/index.js",
   "author": "Log Viewer",
@@ -28,6 +28,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-store": "^10.0.1",
+    "electron-updater": "^6.3.9",
     "lucide-react": "^0.475.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -53,17 +54,28 @@
     "appId": "com.logviewer.app",
     "productName": "Log Viewer",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "out/**/*"
     ],
+    "asarUnpack": [
+      "node_modules/@vscode/ripgrep/**"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "log-viewer",
+      "repo": "log-viewer"
+    },
+    "icon": "build/icon.png",
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-mac.${ext}"
     },
     "win": {
       "target": [
@@ -73,14 +85,15 @@
         },
         "nsis"
       ],
-      "artifactName": "${productName}-${version}-portable.${ext}"
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Development"
+      "category": "Development",
+      "artifactName": "${productName}-${version}-linux.${ext}"
     }
   }
 }
