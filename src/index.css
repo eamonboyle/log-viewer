@@ -1,48 +1,67 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-background: #0a0a0a;
-  --color-foreground: #fafafa;
-  --color-card: #141414;
-  --color-card-foreground: #fafafa;
-  --color-popover: #141414;
-  --color-popover-foreground: #fafafa;
-  --color-primary: #fafafa;
-  --color-primary-foreground: #0a0a0a;
-  --color-secondary: #262626;
-  --color-secondary-foreground: #fafafa;
-  --color-muted: #262626;
-  --color-muted-foreground: #a3a3a3;
-  --color-accent: #262626;
-  --color-accent-foreground: #fafafa;
-  --color-destructive: #ef4444;
-  --color-destructive-foreground: #fafafa;
-  --color-border: #262626;
-  --color-input: #262626;
-  --color-ring: #d4d4d4;
-  --radius: 0.5rem;
+  /* Dark theme (default) - GitHub Dark / precision tool */
+  --color-background: #0d1117;
+  --color-foreground: #e6edf3;
+  --color-card: #161b22;
+  --color-card-foreground: #e6edf3;
+  --color-popover: #161b22;
+  --color-popover-foreground: #e6edf3;
+  --color-primary: #2f81f7;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #21262d;
+  --color-secondary-foreground: #e6edf3;
+  --color-muted: #21262d;
+  --color-muted-foreground: #7d8590;
+  --color-accent: #1c2128;
+  --color-accent-foreground: #e6edf3;
+  --color-destructive: #f85149;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #30363d;
+  --color-input: #21262d;
+  --color-ring: #2f81f7;
+  --radius: 0.375rem;
+
+  --color-level-info: #79c0ff;
+  --color-level-info-bg: rgba(31, 111, 235, 0.18);
+  --color-level-warn: #d29922;
+  --color-level-warn-bg: rgba(187, 128, 9, 0.18);
+  --color-level-error: #f85149;
+  --color-level-error-bg: rgba(248, 81, 73, 0.18);
+  --color-level-debug: #7d8590;
+  --color-level-debug-bg: rgba(125, 133, 144, 0.12);
 }
 
 [data-theme='light'] {
-  --color-background: #fafafa;
-  --color-foreground: #0a0a0a;
+  --color-background: #f6f8fa;
+  --color-foreground: #1f2328;
   --color-card: #ffffff;
-  --color-card-foreground: #0a0a0a;
+  --color-card-foreground: #1f2328;
   --color-popover: #ffffff;
-  --color-popover-foreground: #0a0a0a;
-  --color-primary: #171717;
-  --color-primary-foreground: #fafafa;
-  --color-secondary: #f5f5f5;
-  --color-secondary-foreground: #171717;
-  --color-muted: #f5f5f5;
-  --color-muted-foreground: #737373;
-  --color-accent: #f5f5f5;
-  --color-accent-foreground: #171717;
-  --color-destructive: #dc2626;
-  --color-destructive-foreground: #fafafa;
-  --color-border: #e5e5e5;
-  --color-input: #e5e5e5;
-  --color-ring: #a3a3a3;
+  --color-popover-foreground: #1f2328;
+  --color-primary: #0969da;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f6f8fa;
+  --color-secondary-foreground: #1f2328;
+  --color-muted: #f6f8fa;
+  --color-muted-foreground: #656d76;
+  --color-accent: #f3f4f6;
+  --color-accent-foreground: #1f2328;
+  --color-destructive: #cf222e;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #d0d7de;
+  --color-input: #f6f8fa;
+  --color-ring: #0969da;
+
+  --color-level-info: #0550ae;
+  --color-level-info-bg: rgba(84, 174, 255, 0.12);
+  --color-level-warn: #9a6700;
+  --color-level-warn-bg: rgba(212, 167, 44, 0.12);
+  --color-level-error: #a40e26;
+  --color-level-error-bg: rgba(207, 34, 46, 0.1);
+  --color-level-debug: #656d76;
+  --color-level-debug-bg: rgba(101, 109, 118, 0.1);
 }
 
 * {
@@ -57,8 +76,42 @@ body,
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-background);
   color: var(--color-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Selection highlight */
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
