@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { IPC_INVOKE } from '@shared/ipc'
-import type { AppSettings, EncodingOverride, SettingsExportPayload } from '@shared/types'
+import type { AppSettings, EncodingOverride, SettingsExportPayload, ThemeMode } from '@shared/types'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { useTabStore } from '@/stores/tabStore'
 
 interface SettingsDialogProps {
@@ -11,6 +12,7 @@ interface SettingsDialogProps {
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const settings = useTabStore((s) => s.settings)
   const loadSettings = useTabStore((s) => s.loadSettings)
+  const applyTheme = useTabStore((s) => s.applyTheme)
   const [local, setLocal] = useState<AppSettings | null>(settings)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -20,6 +22,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     const next = { ...local, ...partial }
     setLocal(next)
     await window.logViewer.invoke(IPC_INVOKE.SETTINGS_SET, partial)
+    if (partial.theme) applyTheme(partial.theme)
     await loadSettings()
     setMessage('Saved — reopen files to apply encoding/polling changes.')
   }
@@ -48,7 +51,9 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         const payload = JSON.parse(text) as SettingsExportPayload
         await window.logViewer.invoke(IPC_INVOKE.SETTINGS_IMPORT, payload)
         await loadSettings()
-        setLocal(await window.logViewer.invoke(IPC_INVOKE.SETTINGS_GET))
+        const updated = await window.logViewer.invoke(IPC_INVOKE.SETTINGS_GET)
+        setLocal(updated)
+        applyTheme(updated.theme)
         setMessage('Settings imported.')
       } catch {
         setMessage('Import failed — invalid JSON.')
@@ -57,12 +62,26 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     input.click()
   }
 
+  const handleClearRecent = async () => {
+    await window.logViewer.invoke(IPC_INVOKE.SETTINGS_CLEAR_RECENT)
+    await loadSettings()
+    setMessage('Recent files cleared.')
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-xl">
         <h2 className="mb-4 text-lg font-semibold">Settings</h2>
 
         <div className="space-y-4 text-sm">
+          <label className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground">Light theme</span>
+            <Switch
+              checked={local.theme === 'light'}
+              onCheckedChange={(checked) => void save({ theme: (checked ? 'light' : 'dark') as ThemeMode })}
+            />
+          </label>
+
           <label className="flex flex-col gap-1">
             <span className="text-muted-foreground">Encoding</span>
             <select
@@ -120,12 +139,15 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
             />
           </label>
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex flex-wrap gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={() => void handleExport()}>
               Export prefs
             </Button>
             <Button variant="outline" size="sm" onClick={handleImport}>
               Import prefs
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void handleClearRecent()}>
+              Clear recent files
             </Button>
           </div>
 
