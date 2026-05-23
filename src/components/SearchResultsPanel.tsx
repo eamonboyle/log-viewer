@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect, useState } from 'react'
+import { IPC_INVOKE } from '@shared/ipc'
 import { useSearchStore } from '@/stores/searchStore'
 import { cn } from '@/lib/utils'
 import { useTabStore } from '@/stores/tabStore'
@@ -10,15 +11,67 @@ export function SearchResultsPanel() {
   const query = useSearchStore((s) => s.query)
   const goToMatchIndex = useSearchStore((s) => s.goToMatchIndex)
   const tab = useTabStore((s) => s.getActiveTab())
+  const cacheLines = useTabStore((s) => s.cacheLines)
+  const [fetchTick, setFetchTick] = useState(0)
+
+  const previewMatches = useMemo(() => matches.slice(0, 500), [matches])
+
+  useEffect(() => {
+    if (!showResultsPanel || !tab || previewMatches.length === 0) return
+
+    const missing = previewMatches
+      .map((m) => m.lineNumber)
+      .filter((lineNumber) => !tab.lineCache.has(lineNumber))
+
+    if (missing.length === 0) return
+
+    const unique = [...new Set(missing)].sort((a, b) => a - b)
+    const ranges: { start: number; count: number }[] = []
+    let start = unique[0]
+    let prev = unique[0]
+
+    for (let i = 1; i <= unique.length; i++) {
+      const current = unique[i]
+      if (current === prev + 1) {
+        prev = current
+        continue
+      }
+      ranges.push({ start, count: prev - start + 1 })
+      start = current
+      prev = current
+    }
+
+    let cancelled = false
+    void (async () => {
+      for (const range of ranges) {
+        if (cancelled) return
+        try {
+          const batch = await window.logViewer.invoke(
+            IPC_INVOKE.VIEWPORT_READ_LINES,
+            tab.sessionId,
+            range.start,
+            range.count
+          )
+          cacheLines(tab.id, batch.lines)
+        } catch {
+          break
+        }
+      }
+      if (!cancelled) setFetchTick((t) => t + 1)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [showResultsPanel, tab, previewMatches, cacheLines, fetchTick])
 
   const previews = useMemo(() => {
-    return matches.slice(0, 500).map((match, index) => {
+    return previewMatches.map((match, index) => {
       const text = tab?.lineCache.get(match.lineNumber) ?? '…'
-      const preview =
-        text.length > 120 ? `${text.slice(0, 117)}…` : text
+      const preview = text.length > 120 ? `${text.slice(0, 117)}…` : text
       return { match, index, preview }
     })
-  }, [matches, tab?.lineCache])
+  }, [previewMatches, tab?.lineCache, fetchTick])
 
   if (!showResultsPanel || !query.trim() || matches.length === 0) return null
 

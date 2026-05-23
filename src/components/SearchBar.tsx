@@ -40,7 +40,7 @@ export function SearchBar() {
         if (value.trim()) {
           void runSearch()
         }
-      }, 250)
+      }, 300)
     },
     [runSearch]
   )
