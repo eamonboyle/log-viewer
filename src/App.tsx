@@ -39,28 +39,39 @@ export default function App() {
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
+      e.stopPropagation()
       setDragOver(false)
-      const file = e.dataTransfer.files[0] as (File & { path?: string }) | undefined
-      if (file?.path) void openFile(file.path)
+
+      const file = e.dataTransfer.files[0]
+      if (!file) return
+
+      const path = window.logViewer.getPathForFile(file)
+      if (path) void openFile(path)
     },
     [openFile]
   )
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
     setDragOver(true)
   }, [])
 
-  const handleDragLeave = useCallback(() => setDragOver(false), [])
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+    setDragOver(false)
+  }, [])
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
 
   return (
     <div
       className="flex h-screen flex-col bg-background text-foreground"
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
+      onDropCapture={handleDrop}
+      onDragOverCapture={handleDragOver}
+      onDragEnterCapture={handleDragOver}
+      onDragLeaveCapture={handleDragLeave}
     >
       <TabStrip />
       <Toolbar />

@@ -7,9 +7,4 @@ interface Window {
   }
 }
 
-interface File {
-  /** Electron adds path to File objects from drag-and-drop */
-  path?: string
-}
-
 export {}

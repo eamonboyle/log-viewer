@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_EVENT, IPC_INVOKE, type IpcEventChannel, type IpcInvokeMap } from '@shared/ipc'
 
 const logViewer = {
@@ -30,6 +30,10 @@ const logViewer = {
     const handler = (_event: Electron.IpcRendererEvent, path: string) => listener(path)
     ipcRenderer.on(channel, handler)
     return () => ipcRenderer.removeListener(channel, handler)
+  },
+
+  getPathForFile(file: File): string {
+    return webUtils.getPathForFile(file)
   }
 }
 

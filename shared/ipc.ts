@@ -160,6 +160,7 @@ export interface LogViewerApi {
 
   onMenu(channel: string, listener: () => void): () => void
   onMenuPath(channel: string, listener: (path: string) => void): () => void
+  getPathForFile(file: File): string
 }
 
 declare global {
