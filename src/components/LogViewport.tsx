@@ -28,7 +28,6 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const cacheLines = useTabStore((s) => s.cacheLines)
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
   const consumeScrollTarget = useTabStore((s) => s.consumeScrollTarget)
-  const scrollToLine = useTabStore((s) => s.scrollToLine)
   const settings = useTabStore((s) => s.settings)
 
   const searchMatches = useSearchStore((s) => s.matches)
@@ -44,6 +43,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const [fetchTick, setFetchTick] = useState(0)
   const [scrollTop, setScrollTop] = useState(0)
   const [clientHeight, setClientHeight] = useState(0)
+  const [scrollHeight, setScrollHeight] = useState(0)
   const [highlightColumn, setHighlightColumn] = useState<number | null>(null)
   const [highlightLine, setHighlightLine] = useState<number | null>(null)
 
@@ -74,9 +74,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
     },
     overscan: OVERSCAN,
     getItemKey: (index) => index,
-    measureElement: wordWrap
-      ? (el) => el.getBoundingClientRect().height
-      : undefined
+    measureElement: undefined
   })
 
   const virtualItems = virtualizer.getVirtualItems()
@@ -164,8 +162,12 @@ export function LogViewport({ tabId }: LogViewportProps) {
 
   useEffect(() => {
     heightCacheRef.current.clear()
-    virtualizer.measure()
-  }, [wordWrap, fontSize, settings?.lineHeight, virtualizer])
+    if (wordWrap) {
+      virtualizer.measure()
+    }
+    // virtualizer identity changes when its internal state updates — omit from deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wordWrap, fontSize, settings?.lineHeight])
 
   useEffect(() => {
     const target = consumeScrollTarget(tabId)
@@ -261,24 +263,36 @@ export function LogViewport({ tabId }: LogViewportProps) {
       if (!parentRef.current) return
       setScrollTop(parentRef.current.scrollTop)
       setClientHeight(parentRef.current.clientHeight)
+      setScrollHeight(parentRef.current.scrollHeight)
     })
   }, [tab, tabId, effectiveRowHeight, baseRowHeight, wordWrap, setFollowPinned])
 
   useEffect(() => {
     const el = parentRef.current
     if (!el) return
+    setScrollHeight(el.scrollHeight)
+  }, [totalSize, fetchTick])
+
+  useEffect(() => {
+    const el = parentRef.current
+    if (!el) return
     setClientHeight(el.clientHeight)
-    const ro = new ResizeObserver(() => setClientHeight(el.clientHeight))
+    setScrollHeight(el.scrollHeight)
+    const ro = new ResizeObserver(() => {
+      setClientHeight(el.clientHeight)
+      setScrollHeight(el.scrollHeight)
+    })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
   const handleMeasuredHeight = useCallback(
     (lineNumber: number, height: number) => {
+      const rounded = Math.ceil(height)
       const prev = heightCacheRef.current.get(lineNumber)
-      if (prev === height) return
-      heightCacheRef.current.set(lineNumber, height)
-      virtualizer.resizeItem(lineNumber, height)
+      if (prev === rounded) return
+      heightCacheRef.current.set(lineNumber, rounded)
+      virtualizer.resizeItem(lineNumber, rounded)
 
       if (
         followPinnedRef.current &&
@@ -309,12 +323,15 @@ export function LogViewport({ tabId }: LogViewportProps) {
     [handleScroll]
   )
 
-  const handleMinimapJump = useCallback(
-    (lineNumber: number) => {
-      scrollToLine(tabId, lineNumber)
-      setFollowPinned(tabId, false)
+  const handleMinimapScroll = useCallback(
+    (targetScrollTop: number) => {
+      if (parentRef.current) {
+        parentRef.current.scrollTop = targetScrollTop
+        setFollowPinned(tabId, false)
+        handleScroll()
+      }
     },
-    [scrollToLine, setFollowPinned, tabId]
+    [handleScroll, setFollowPinned, tabId]
   )
 
   const showCompressedScrollbar = useMemo(
@@ -335,12 +352,12 @@ export function LogViewport({ tabId }: LogViewportProps) {
   if (!tab) return null
 
   return (
-    <div className="flex h-full">
-      <div className="relative min-w-0 flex-1">
+    <div className="flex h-full min-h-0 min-w-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <SearchResultsPanel />
         <div
           ref={parentRef}
-          className="h-full overflow-auto bg-background"
+          className="min-h-0 flex-1 overflow-auto bg-background"
           onScroll={handleScroll}
         >
           <div
@@ -360,7 +377,6 @@ export function LogViewport({ tabId }: LogViewportProps) {
                 <div
                   key={vi.key}
                   data-index={vi.index}
-                  ref={wordWrap ? virtualizer.measureElement : undefined}
                   style={{
                     position: 'absolute',
                     top: 0,
@@ -398,8 +414,8 @@ export function LogViewport({ tabId }: LogViewportProps) {
         tabId={tabId}
         scrollTop={scrollTop}
         clientHeight={clientHeight}
-        rowHeight={baseRowHeight}
-        onScrollToLine={handleMinimapJump}
+        scrollHeight={scrollHeight}
+        onScrollTo={handleMinimapScroll}
       />
 
       {showCompressedScrollbar && (
