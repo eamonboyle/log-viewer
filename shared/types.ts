@@ -33,6 +33,8 @@ export interface HighlightRule {
   caseSensitive: boolean
   color: string
   background?: string
+  /** Optional glob — rule applies only when tab path matches (e.g. "*.error.log") */
+  filePattern?: string
 }
 
 export interface HighlightSegment {
@@ -85,6 +87,13 @@ export interface FileOpenResult {
 
 export type EncodingOverride = Encoding | 'auto'
 
+export type ThemeMode = 'dark' | 'light'
+
+export interface ColumnLayout {
+  delimiter: 'tab' | 'comma' | 'pipe'
+  columnCount: number
+}
+
 export interface AppSettings {
   fontFamily: string
   fontSize: number
@@ -97,6 +106,7 @@ export interface AppSettings {
   /** Force chokidar polling (auto-enabled for UNC paths) */
   usePolling: boolean | 'auto'
   pollIntervalMs: number
+  theme: ThemeMode
 }
 
 export interface TabSearchSnapshot {
@@ -166,6 +176,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   encoding: 'auto',
   usePolling: 'auto',
   pollIntervalMs: 100,
+  theme: 'dark',
   highlightRules: [
     {
       id: 'error',

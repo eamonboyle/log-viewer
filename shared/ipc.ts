@@ -30,7 +30,9 @@ export const IPC_INVOKE = {
   SEARCH_GET_STATE: 'search:getState',
   SETTINGS_EXPORT: 'settings:export',
   SETTINGS_IMPORT: 'settings:import',
-  MINIMAP_SAMPLES: 'minimap:samples'
+  MINIMAP_SAMPLES: 'minimap:samples',
+  SETTINGS_CLEAR_RECENT: 'settings:clearRecent',
+  COLUMN_DETECT: 'column:detect'
 } as const
 
 /** Main → Renderer push channels */
@@ -109,6 +111,14 @@ export interface IpcInvokeMap {
   [IPC_INVOKE.MINIMAP_SAMPLES]: {
     args: [sessionId: string, maxSamples: number]
     result: MinimapSample[]
+  }
+  [IPC_INVOKE.SETTINGS_CLEAR_RECENT]: {
+    args: []
+    result: AppSettings
+  }
+  [IPC_INVOKE.COLUMN_DETECT]: {
+    args: [sessionId: string]
+    result: import('./types').ColumnLayout | null
   }
 }
 
