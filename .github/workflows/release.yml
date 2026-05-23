@@ -27,10 +27,40 @@ jobs:
       - run: npm run build
       - run: npx electron-builder --publish never
 
-      - name: Upload artifacts
+      - name: Upload Windows artifacts
+        if: runner.os == 'Windows'
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: false
           files: |
-            release/**/*
+            release/Log Viewer-*-win-*.exe
+            release/Log Viewer*Setup*.exe
+            release/latest.yml
+            release/*.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS artifacts
+        if: runner.os == 'macOS'
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: false
+          files: |
+            release/Log Viewer-*-mac.dmg
+            release/Log Viewer-*-mac.zip
+            release/latest-mac.yml
+            release/*-mac.*.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        if: runner.os == 'Linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: false
+          files: |
+            release/Log Viewer-*-linux.AppImage
+            release/Log Viewer-*-linux.deb
+            release/latest-linux.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
