@@ -65,7 +65,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "log-viewer",
+      "owner": "eamonboyle",
       "repo": "log-viewer"
     },
     "icon": "build/icon.png",

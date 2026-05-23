@@ -55,4 +55,4 @@ First stable release — cross-platform desktop log viewer with watch-first tail
 - Time range filter UI present but disabled (coming in v1.1)
 - Level counts in sidebar reflect cached viewport lines until full scan completes
 
-[1.0.0]: https://github.com/log-viewer/log-viewer/releases/tag/v1.0.0
+[1.0.0]: https://github.com/eamonboyle/log-viewer/releases/tag/v1.0.0

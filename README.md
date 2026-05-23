@@ -4,7 +4,7 @@ Modern cross-platform desktop log viewer built with Electron, React, and TypeScr
 
 ## Install
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/log-viewer/log-viewer/releases):
+Download the latest release for your platform from [GitHub Releases](https://github.com/eamonboyle/log-viewer/releases):
 
 | Platform | Artifact |
 |----------|----------|
