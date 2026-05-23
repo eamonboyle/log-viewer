@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "Modern real-time log viewer — watch-first tail engine for multi-GB files",
   "main": "./out/main/index.js",
-  "author": "Log Viewer",
+  "author": {
+    "name": "Log Viewer",
+    "email": "eamonboyle@users.noreply.github.com"
+  },
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
