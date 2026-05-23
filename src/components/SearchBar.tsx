@@ -20,6 +20,8 @@ export function SearchBar() {
   const nextMatch = useSearchStore((s) => s.nextMatch)
   const prevMatch = useSearchStore((s) => s.prevMatch)
   const close = useSearchStore((s) => s.close)
+  const toggleResultsPanel = useSearchStore((s) => s.toggleResultsPanel)
+  const showResultsPanel = useSearchStore((s) => s.showResultsPanel)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -153,6 +155,17 @@ export function SearchBar() {
         />
         W
       </label>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2 text-xs"
+        disabled={total === 0}
+        onClick={toggleResultsPanel}
+        title="Toggle results list"
+      >
+        {showResultsPanel ? 'List ▾' : 'List ▸'}
+      </Button>
 
       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={close} title="Close (Esc)">
         <X className="h-4 w-4" />

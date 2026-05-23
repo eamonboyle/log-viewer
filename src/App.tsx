@@ -6,13 +6,14 @@ import { StatusBar } from '@/components/StatusBar'
 import { TabStrip } from '@/components/TabStrip'
 import { Toolbar } from '@/components/Toolbar'
 import { useKeyboardShortcuts, useMenuShortcuts, useTailEvents } from '@/hooks/useTailEvents'
-import { subscribeSearchStaleEvents } from '@/stores/searchStore'
+import { subscribeSearchStaleEvents, useSearchStore } from '@/stores/searchStore'
 import { useTabStore } from '@/stores/tabStore'
 import { cn } from '@/lib/utils'
 
 export default function App() {
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
+  const switchSearchTab = useSearchStore((s) => s.switchTab)
   const openFile = useTabStore((s) => s.openFile)
   const loadSettings = useTabStore((s) => s.loadSettings)
   const settings = useTabStore((s) => s.settings)
@@ -27,6 +28,10 @@ export default function App() {
   }, [loadSettings])
 
   useEffect(() => subscribeSearchStaleEvents(), [])
+
+  useEffect(() => {
+    void switchSearchTab(activeTabId)
+  }, [activeTabId, switchSearchTab])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {

@@ -6,7 +6,9 @@ import { useTabStore } from '@/stores/tabStore'
 export function GoToLineDialog() {
   const isOpen = useGoToLineStore((s) => s.isOpen)
   const lineInput = useGoToLineStore((s) => s.lineInput)
+  const columnInput = useGoToLineStore((s) => s.columnInput)
   const setLineInput = useGoToLineStore((s) => s.setLineInput)
+  const setColumnInput = useGoToLineStore((s) => s.setColumnInput)
   const submit = useGoToLineStore((s) => s.submit)
   const close = useGoToLineStore((s) => s.close)
   const tab = useTabStore((s) => s.getActiveTab())
@@ -37,17 +39,26 @@ export function GoToLineDialog() {
   return (
     <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
       <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-        <span className="text-sm text-muted-foreground">Go to line:</span>
+        <span className="text-sm text-muted-foreground">Go to:</span>
         <input
           ref={inputRef}
-          type="number"
-          min={1}
-          max={maxLine}
+          type="text"
           value={lineInput}
           onChange={(e) => setLineInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`1–${maxLine}`}
-          className="w-24 bg-transparent text-sm outline-none tabular-nums"
+          placeholder={`line or line:col (1–${maxLine})`}
+          className="w-40 bg-transparent text-sm outline-none tabular-nums"
+          spellCheck={false}
+        />
+        <span className="text-sm text-muted-foreground">:</span>
+        <input
+          type="text"
+          value={columnInput}
+          onChange={(e) => setColumnInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="col"
+          className="w-16 bg-transparent text-sm outline-none tabular-nums"
+          spellCheck={false}
         />
         <Button size="sm" onClick={submit}>
           Go

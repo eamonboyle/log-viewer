@@ -14,7 +14,14 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'electron/main/index.ts')
+          index: resolve(__dirname, 'electron/main/index.ts'),
+          'workers/index-builder.worker': resolve(__dirname, 'electron/workers/index-builder.worker.ts')
+        },
+        output: {
+          entryFileNames: (chunk) =>
+            chunk.name === 'workers/index-builder.worker'
+              ? 'workers/index-builder.worker.js'
+              : '[name].js'
         }
       }
     }

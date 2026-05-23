@@ -1,12 +1,15 @@
 import type {
+  AppSettings,
   FileOpenResult,
   FileErrorPayload,
   FileRotatedPayload,
   IndexProgressPayload,
   IndexStatus,
   LineBatch,
+  MinimapSample,
   SearchOptions,
   SearchState,
+  SettingsExportPayload,
   TailAppendedPayload
 } from './types'
 
@@ -24,7 +27,10 @@ export const IPC_INVOKE = {
   SEARCH_NEXT: 'search:next',
   SEARCH_PREV: 'search:prev',
   SEARCH_CANCEL: 'search:cancel',
-  SEARCH_GET_STATE: 'search:getState'
+  SEARCH_GET_STATE: 'search:getState',
+  SETTINGS_EXPORT: 'settings:export',
+  SETTINGS_IMPORT: 'settings:import',
+  MINIMAP_SAMPLES: 'minimap:samples'
 } as const
 
 /** Main → Renderer push channels */
@@ -91,6 +97,18 @@ export interface IpcInvokeMap {
   [IPC_INVOKE.SEARCH_GET_STATE]: {
     args: [sessionId: string]
     result: SearchState | null
+  }
+  [IPC_INVOKE.SETTINGS_EXPORT]: {
+    args: []
+    result: SettingsExportPayload
+  }
+  [IPC_INVOKE.SETTINGS_IMPORT]: {
+    args: [payload: SettingsExportPayload]
+    result: AppSettings
+  }
+  [IPC_INVOKE.MINIMAP_SAMPLES]: {
+    args: [sessionId: string, maxSamples: number]
+    result: MinimapSample[]
   }
 }
 

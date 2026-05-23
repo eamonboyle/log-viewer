@@ -67,9 +67,13 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
-      ]
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        },
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "linux": {
       "target": [

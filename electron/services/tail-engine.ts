@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import chokidar, { type FSWatcher } from 'chokidar'
+import type { Encoding, EncodingOverride } from '@shared/types'
 import type {
   FileErrorPayload,
   FileRotatedPayload,
@@ -8,10 +9,22 @@ import type {
 } from '@shared/types'
 import { decodeLine, splitLines, SparseLineIndex } from './sparse-index'
 import { RangeReader } from './range-reader'
+import {
+  createInitialChunkState,
+  processIndexChunkInWorker,
+  terminateIndexWorker,
+  type IndexChunkState
+} from './index-builder-client'
 
 const BATCH_MS = 16
 const AWAIT_WRITE_FINISH_MS = 50
 const INDEX_CHUNK = 256 * 1024
+
+export interface TailEngineOptions {
+  encodingOverride?: EncodingOverride
+  usePolling?: boolean | 'auto'
+  pollIntervalMs?: number
+}
 
 export interface TailEngineEvents {
   appended: (payload: TailAppendedPayload) => void
@@ -20,22 +33,43 @@ export interface TailEngineEvents {
   error: (payload: FileErrorPayload) => void
 }
 
+export function isUncPath(filePath: string): boolean {
+  return filePath.startsWith('\\\\') || filePath.startsWith('//')
+}
+
+export function resolveUsePolling(filePath: string, setting: boolean | 'auto'): boolean {
+  if (setting === true) return true
+  if (setting === false) return false
+  return isUncPath(filePath) || process.platform === 'win32'
+}
+
 export class TailEngine extends EventEmitter {
   private watcher: FSWatcher | null = null
-  private readOffset = 0
+  /** Byte offset through which tail reads have been applied */
+  private tailByteOffset = 0
   private partialBuffer = Buffer.alloc(0)
   private batchTimer: ReturnType<typeof setTimeout> | null = null
   private pendingLines: { fromLine: number; texts: string[] } | null = null
   private destroyed = false
   private followEnabled = true
+  private indexing = false
+  private workerState: IndexChunkState | null = null
 
   readonly index: SparseLineIndex
   readonly reader: RangeReader
 
-  constructor(readonly filePath: string) {
+  constructor(
+    readonly filePath: string,
+    private readonly options: TailEngineOptions = {}
+  ) {
     super()
     this.index = new SparseLineIndex()
     this.reader = new RangeReader(filePath, this.index)
+
+    const override = options.encodingOverride
+    if (override && override !== 'auto') {
+      this.index.setEncodingOverride(override)
+    }
   }
 
   isFollowEnabled(): boolean {
@@ -53,8 +87,8 @@ export class TailEngine extends EventEmitter {
       return
     }
 
-    await this.initialIndex()
     await this.startWatch()
+    void this.runBackgroundIndex()
     await this.readNewBytes()
   }
 
@@ -66,37 +100,70 @@ export class TailEngine extends EventEmitter {
     }
     await this.watcher?.close()
     this.watcher = null
+    terminateIndexWorker()
   }
 
-  private async initialIndex(): Promise<void> {
+  private encodingOverrideValue(): Encoding | undefined {
+    const o = this.options.encodingOverride
+    return o && o !== 'auto' ? o : undefined
+  }
+
+  private async runBackgroundIndex(): Promise<void> {
+    if (this.indexing) return
+    this.indexing = true
+
     const fileSize = await this.reader.getFileSize()
     this.index.setFileSize(fileSize)
-    this.readOffset = 0
+    this.tailByteOffset = 0
     this.partialBuffer = Buffer.alloc(0)
 
-    while (this.readOffset < fileSize && !this.destroyed) {
-      const chunk = await this.reader.readRange(this.readOffset, Math.min(this.readOffset + INDEX_CHUNK, fileSize))
-      if (chunk.length === 0) break
+    this.workerState = createInitialChunkState(this.encodingOverrideValue())
 
-      if (this.readOffset === 0) {
-        this.index.detectEncoding(chunk)
+    try {
+      let indexReadOffset = 0
+      while (indexReadOffset < fileSize && !this.destroyed) {
+        const chunk = await this.reader.readRange(
+          indexReadOffset,
+          Math.min(indexReadOffset + INDEX_CHUNK, fileSize)
+        )
+        if (chunk.length === 0) break
+
+        const result = await processIndexChunkInWorker(
+          chunk,
+          indexReadOffset,
+          this.workerState,
+          this.encodingOverrideValue()
+        )
+
+        this.workerState = result.state
+        this.index.applyBoundariesBatch(result.boundaries)
+        this.index.syncFromWorkerState({
+          ...result.state,
+          indexedThrough: result.indexedThrough
+        })
+        indexReadOffset = result.indexedThrough
+        this.tailByteOffset = indexReadOffset
+
+        this.emitProgress(false)
+        await new Promise((r) => setImmediate(r))
       }
 
-      this.processIncomingBytes(chunk, false)
-      this.emitProgress(false)
+      this.index.finalize(fileSize, false)
+      this.emitProgress(true)
+    } catch (err) {
+      this.emit('error', { message: (err as Error).message })
+    } finally {
+      this.indexing = false
     }
-
-    this.index.finalize(fileSize, this.partialBuffer.length > 0)
-    this.emitProgress(true)
   }
 
   private processIncomingBytes(data: Buffer, emitLines: boolean): void {
     const combined = Buffer.concat([this.partialBuffer, data])
-    const baseOffset = this.readOffset - this.partialBuffer.length
+    const baseOffset = this.tailByteOffset - this.partialBuffer.length
     const { complete, partial } = splitLines(combined)
 
     this.partialBuffer = Buffer.from(partial)
-    this.readOffset = baseOffset + combined.length - partial.length
+    this.tailByteOffset = baseOffset + combined.length - partial.length
 
     const fromLine = this.index.getLineCount()
     const texts: string[] = []
@@ -114,6 +181,9 @@ export class TailEngine extends EventEmitter {
   }
 
   private async startWatch(): Promise<void> {
+    const usePolling = resolveUsePolling(this.filePath, this.options.usePolling ?? 'auto')
+    const pollInterval = this.options.pollIntervalMs ?? 100
+
     this.watcher = chokidar.watch(this.filePath, {
       persistent: true,
       ignoreInitial: true,
@@ -121,7 +191,8 @@ export class TailEngine extends EventEmitter {
         stabilityThreshold: AWAIT_WRITE_FINISH_MS,
         pollInterval: 20
       },
-      usePolling: process.platform === 'win32'
+      usePolling,
+      interval: pollInterval
     })
 
     this.watcher.on('change', () => {
@@ -144,16 +215,16 @@ export class TailEngine extends EventEmitter {
     try {
       const fileSize = await this.reader.getFileSize()
 
-      if (fileSize < this.readOffset - this.partialBuffer.length) {
+      if (fileSize < this.tailByteOffset - this.partialBuffer.length) {
         await this.handleTruncate(fileSize)
         return
       }
 
       this.index.setFileSize(fileSize)
 
-      if (fileSize <= this.readOffset) return
+      if (fileSize <= this.tailByteOffset) return
 
-      const newData = await this.reader.readRange(this.readOffset, fileSize)
+      const newData = await this.reader.readRange(this.tailByteOffset, fileSize)
       if (newData.length === 0) return
 
       this.processIncomingBytes(newData, true)
@@ -170,11 +241,12 @@ export class TailEngine extends EventEmitter {
   }
 
   private async handleTruncate(newSize: number): Promise<void> {
-    this.readOffset = 0
+    this.tailByteOffset = 0
     this.partialBuffer = Buffer.alloc(0)
     this.index.reset(newSize)
     this.index.setFileSize(newSize)
-    await this.initialIndex()
+    this.workerState = createInitialChunkState(this.encodingOverrideValue())
+    void this.runBackgroundIndex()
     this.emit('rotated', { preservedScroll: false })
   }
 
@@ -189,11 +261,12 @@ export class TailEngine extends EventEmitter {
       return
     }
 
-    this.readOffset = 0
+    this.tailByteOffset = 0
     this.partialBuffer = Buffer.alloc(0)
     this.index.reset()
+    this.workerState = createInitialChunkState(this.encodingOverrideValue())
     await this.startWatch()
-    await this.initialIndex()
+    void this.runBackgroundIndex()
     this.emit('rotated', { preservedScroll: false })
     await this.readNewBytes()
   }

@@ -83,12 +83,42 @@ export interface FileOpenResult {
   fileSize: number
 }
 
+export type EncodingOverride = Encoding | 'auto'
+
 export interface AppSettings {
   fontFamily: string
   fontSize: number
   lineHeight: number
   highlightRules: HighlightRule[]
   recentFiles: string[]
+  wordWrap: boolean
+  tabWidth: number
+  encoding: EncodingOverride
+  /** Force chokidar polling (auto-enabled for UNC paths) */
+  usePolling: boolean | 'auto'
+  pollIntervalMs: number
+}
+
+export interface TabSearchSnapshot {
+  isOpen: boolean
+  query: string
+  options: SearchOptions
+  matches: SearchMatch[]
+  currentIndex: number
+  total: number
+  stale: boolean
+  error: string | null
+}
+
+export interface MinimapSample {
+  lineNumber: number
+  kind: 'normal' | 'warn' | 'error'
+}
+
+export interface SettingsExportPayload {
+  version: 1
+  settings: AppSettings
+  exportedAt: string
 }
 
 export interface SearchOptions {
@@ -131,6 +161,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   fontSize: 13,
   lineHeight: 1.4,
+  wordWrap: false,
+  tabWidth: 4,
+  encoding: 'auto',
+  usePolling: 'auto',
+  pollIntervalMs: 100,
   highlightRules: [
     {
       id: 'error',

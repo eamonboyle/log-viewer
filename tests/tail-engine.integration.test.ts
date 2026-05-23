@@ -2,7 +2,19 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { TailEngine } from '../electron/services/tail-engine'
+import { TailEngine, isUncPath, resolveUsePolling } from '../electron/services/tail-engine'
+
+describe('tail-engine helpers', () => {
+  it('detects UNC paths', () => {
+    expect(isUncPath('\\\\server\\share\\file.log')).toBe(true)
+    expect(isUncPath('C:\\local\\file.log')).toBe(false)
+  })
+
+  it('resolves polling for UNC in auto mode', () => {
+    expect(resolveUsePolling('\\\\server\\share\\f.log', 'auto')).toBe(true)
+    expect(resolveUsePolling('/local/f.log', false)).toBe(false)
+  })
+})
 
 describe('TailEngine integration', () => {
   let tmpDir: string
@@ -35,7 +47,7 @@ describe('TailEngine integration', () => {
       await fs.appendFile(filePath, `line-${i}\n`)
     }
 
-    await new Promise((r) => setTimeout(r, 500))
+    await new Promise((r) => setTimeout(r, 400))
     await engine.stop()
 
     expect(appended.length).toBeGreaterThanOrEqual(totalLines - 1)
@@ -73,7 +85,7 @@ describe('TailEngine integration', () => {
     await new Promise((r) => setTimeout(r, 200))
 
     await fs.writeFile(filePath, 'new after truncate\n')
-    await new Promise((r) => setTimeout(r, 500))
+    await new Promise((r) => setTimeout(r, 800))
     await engine.stop()
 
     expect(engine.index.getLineCount()).toBeGreaterThanOrEqual(1)

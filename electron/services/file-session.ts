@@ -1,7 +1,16 @@
 import { randomUUID } from 'crypto'
-import type { FileOpenResult, IndexStatus, LineBatch, SearchOptions, SearchState } from '@shared/types'
-import { TailEngine } from './tail-engine'
+import type {
+  FileOpenResult,
+  IndexStatus,
+  LineBatch,
+  MinimapSample,
+  SearchOptions,
+  SearchState
+} from '@shared/types'
+import { TailEngine, type TailEngineOptions } from './tail-engine'
 import { SearchService } from './search-service'
+
+export interface FileSessionOptions extends TailEngineOptions {}
 
 export class FileSession {
   readonly id: string
@@ -10,9 +19,12 @@ export class FileSession {
   private started = false
   private onSearchStale: ((sessionId: string, fileSize: number) => void) | null = null
 
-  constructor(readonly filePath: string) {
+  constructor(
+    readonly filePath: string,
+    options: FileSessionOptions = {}
+  ) {
     this.id = randomUUID()
-    this.tailEngine = new TailEngine(filePath)
+    this.tailEngine = new TailEngine(filePath, options)
     this.searchService = new SearchService()
 
     this.tailEngine.on('appended', () => {
@@ -88,16 +100,42 @@ export class FileSession {
   getSearchState(): SearchState | null {
     return this.searchService.getState()
   }
+
+  async getMinimapSamples(maxSamples: number): Promise<MinimapSample[]> {
+    const lineCount = this.getIndexStatus().lineCount
+    if (lineCount === 0) return []
+
+    const step = Math.max(1, Math.floor(lineCount / maxSamples))
+    const samples: MinimapSample[] = []
+
+    for (let line = 0; line < lineCount; line += step) {
+      const batch = await this.readLines(line, 1)
+      const text = batch.lines[0]?.text ?? ''
+      samples.push({
+        lineNumber: line,
+        kind: classifyMinimapLine(text)
+      })
+    }
+
+    return samples
+  }
+}
+
+function classifyMinimapLine(text: string): MinimapSample['kind'] {
+  const upper = text.toUpperCase()
+  if (upper.includes('ERROR')) return 'error'
+  if (upper.includes('WARN')) return 'warn'
+  return 'normal'
 }
 
 export class SessionManager {
   private sessions = new Map<string, FileSession>()
 
-  async open(filePath: string): Promise<FileSession> {
+  async open(filePath: string, options: FileSessionOptions = {}): Promise<FileSession> {
     const existing = [...this.sessions.values()].find((s) => s.filePath === filePath)
     if (existing) return existing
 
-    const session = new FileSession(filePath)
+    const session = new FileSession(filePath, options)
     await session.start()
     this.sessions.set(session.id, session)
     return session

@@ -168,6 +168,36 @@ export class SparseLineIndex {
     this.fileSize = size
   }
 
+  /** Apply boundaries produced by the index worker */
+  applyBoundariesBatch(boundaries: LineBoundary[]): void {
+    for (const boundary of boundaries) {
+      this.boundaries.push(boundary)
+    }
+    if (boundaries.length > 0) {
+      this.lineCount = this.boundaries.length
+    }
+  }
+
+  syncFromWorkerState(state: {
+    encoding: Encoding
+    eol: Eol
+    lineCount: number
+    anchors: IndexAnchor[]
+    indexedThrough: number
+  }): void {
+    this.encoding = state.encoding
+    this.eol = state.eol
+    this.lineCount = state.lineCount
+    this.anchors = [...state.anchors]
+    this.indexedThrough = state.indexedThrough
+    this.bomSkipped = true
+  }
+
+  setEncodingOverride(encoding: Encoding): void {
+    this.encoding = encoding
+    this.bomSkipped = true
+  }
+
   /** Find anchor at or before target line */
   findAnchorForLine(targetLine: number): IndexAnchor {
     let lo = 0
@@ -247,6 +277,9 @@ export function splitLines(buffer: Buffer): { complete: Buffer[]; partial: Buffe
 export function decodeLine(buffer: Buffer, encoding: Encoding): string {
   if (encoding === 'utf16le') {
     return buffer.toString('utf16le').replace(/\r?\n$/, '')
+  }
+  if (encoding === 'latin1') {
+    return buffer.toString('latin1').replace(/\r?\n$/, '')
   }
   return buffer.toString('utf8').replace(/\r?\n$/, '')
 }

@@ -38,17 +38,20 @@ export function useTailEvents(): void {
 
 export function useMenuShortcuts(): void {
   const openFileDialog = useTabStore((s) => s.openFileDialog)
+  const openFileDialogInNewTab = useTabStore((s) => s.openFileDialogInNewTab)
   const closeTab = useTabStore((s) => s.closeTab)
   const toggleFollow = useTabStore((s) => s.toggleFollow)
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const openFile = useTabStore((s) => s.openFile)
+  const openFileInNewTab = useTabStore((s) => s.openFileInNewTab)
   const openSearch = useSearchStore((s) => s.open)
   const openGoToLine = useGoToLineStore((s) => s.open)
 
   useEffect(() => {
     const unsubs = [
       window.logViewer.onMenu('menu:open-file', () => void openFileDialog()),
+      window.logViewer.onMenu('menu:open-file-new-tab', () => void openFileDialogInNewTab()),
       window.logViewer.onMenu('menu:close-tab', () => {
         if (activeTabId) void closeTab(activeTabId)
       }),
@@ -60,14 +63,27 @@ export function useMenuShortcuts(): void {
       }),
       window.logViewer.onMenu('menu:find', () => openSearch()),
       window.logViewer.onMenu('menu:goto-line', () => openGoToLine()),
-      window.logViewer.onMenuPath('menu:open-path', (path) => void openFile(path))
+      window.logViewer.onMenuPath('menu:open-path', (path) => void openFile(path)),
+      window.logViewer.onMenuPath('menu:open-path-new-tab', (path) => void openFileInNewTab(path))
     ]
     return () => unsubs.forEach((u) => u())
-  }, [openFileDialog, closeTab, toggleFollow, setFollowPinned, activeTabId, openFile, openSearch, openGoToLine])
+  }, [
+    openFileDialog,
+    openFileDialogInNewTab,
+    closeTab,
+    toggleFollow,
+    setFollowPinned,
+    activeTabId,
+    openFile,
+    openFileInNewTab,
+    openSearch,
+    openGoToLine
+  ])
 }
 
 export function useKeyboardShortcuts(): void {
   const openFileDialog = useTabStore((s) => s.openFileDialog)
+  const openFileDialogInNewTab = useTabStore((s) => s.openFileDialogInNewTab)
   const closeTab = useTabStore((s) => s.closeTab)
   const toggleFollow = useTabStore((s) => s.toggleFollow)
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
@@ -119,7 +135,8 @@ export function useKeyboardShortcuts(): void {
 
       if (e.ctrlKey && e.key === 'o') {
         e.preventDefault()
-        void openFileDialog()
+        if (e.shiftKey) void openFileDialogInNewTab()
+        else void openFileDialog()
       }
       if (e.ctrlKey && e.key === 'w') {
         e.preventDefault()
@@ -138,6 +155,7 @@ export function useKeyboardShortcuts(): void {
     return () => window.removeEventListener('keydown', handler)
   }, [
     openFileDialog,
+    openFileDialogInNewTab,
     closeTab,
     toggleFollow,
     setFollowPinned,

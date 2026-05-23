@@ -34,3 +34,12 @@ export function getVirtualTotalSize(totalLines: number, rowHeight: number): numb
   if (totalLines <= 100_000) return totalLines * rowHeight
   return 100_000 * rowHeight
 }
+
+export function getEffectiveRowHeight(totalLines: number, rowHeight: number): number {
+  if (totalLines <= 100_000) return rowHeight
+  return rowHeight * (100_000 / totalLines)
+}
+
+export function isCompressedScroll(totalLines: number): boolean {
+  return totalLines > 100_000
+}

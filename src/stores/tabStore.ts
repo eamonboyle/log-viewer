@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { StoreApi } from 'zustand'
 import { IPC_INVOKE } from '@shared/ipc'
 import type { AppSettings, HighlightRule, HighlightedLine, LogLine } from '@shared/types'
 
@@ -19,6 +20,8 @@ export interface TabSession {
   lineCache: Map<number, string>
   /** Line to scroll to (0-based); consumed by LogViewport */
   scrollTargetLine: number | null
+  /** Column to scroll/highlight (0-based); consumed by LogViewport */
+  scrollTargetColumn: number | null
 }
 
 interface TabStore {
@@ -28,7 +31,9 @@ interface TabStore {
 
   loadSettings: () => Promise<void>
   openFile: (path: string) => Promise<void>
+  openFileInNewTab: (path: string) => Promise<void>
   openFileDialog: () => Promise<void>
+  openFileDialogInNewTab: () => Promise<void>
   closeTab: (tabId: string) => Promise<void>
   setActiveTab: (tabId: string) => void
   setFollow: (tabId: string, enabled: boolean) => Promise<void>
@@ -41,14 +46,45 @@ interface TabStore {
   getLine: (tabId: string, lineNumber: number) => string | undefined
   getActiveTab: () => TabSession | undefined
   updateHighlightRules: (rules: HighlightRule[]) => Promise<void>
-  scrollToLine: (tabId: string, lineNumber: number) => void
-  consumeScrollTarget: (tabId: string) => number | null
-  gotoLine: (tabId: string, lineOneBased: number) => void
+  scrollToLine: (tabId: string, lineNumber: number, column?: number) => void
+  consumeScrollTarget: (tabId: string) => { line: number; column: number | null } | null
+  gotoLine: (tabId: string, lineOneBased: number, columnOneBased?: number) => void
 }
 
 function makeDisplayName(path: string): string {
   const parts = path.replace(/\\/g, '/').split('/')
   return parts[parts.length - 1] || path
+}
+
+async function createTabFromPath(
+  path: string,
+  set: StoreApi<TabStore>['setState']
+): Promise<void> {
+  const result = await window.logViewer.invoke(IPC_INVOKE.FILE_OPEN, path)
+  const tab: TabSession = {
+    id: crypto.randomUUID(),
+    sessionId: result.sessionId,
+    path: result.path,
+    displayName: makeDisplayName(result.path),
+    lineCount: result.lineCount,
+    fileSize: result.fileSize,
+    followEnabled: true,
+    followPinned: true,
+    hasUnread: false,
+    indexPercent: 0,
+    indexComplete: false,
+    error: null,
+    lineCache: new Map(),
+    scrollTargetLine: null,
+    scrollTargetColumn: null
+  }
+
+  set((s) => ({
+    tabs: [...s.tabs, tab],
+    activeTabId: tab.id
+  }))
+
+  await window.logViewer.invoke(IPC_INVOKE.TAIL_SET_FOLLOW, result.sessionId, true)
 }
 
 export const useTabStore = create<TabStore>((set, get) => ({
@@ -68,35 +104,23 @@ export const useTabStore = create<TabStore>((set, get) => ({
       return
     }
 
-    const result = await window.logViewer.invoke(IPC_INVOKE.FILE_OPEN, path)
-    const tab: TabSession = {
-      id: crypto.randomUUID(),
-      sessionId: result.sessionId,
-      path: result.path,
-      displayName: makeDisplayName(result.path),
-      lineCount: result.lineCount,
-      fileSize: result.fileSize,
-      followEnabled: true,
-      followPinned: true,
-      hasUnread: false,
-      indexPercent: 0,
-      indexComplete: false,
-      error: null,
-      lineCache: new Map(),
-      scrollTargetLine: null
-    }
+    await createTabFromPath(path, set)
+    await get().loadSettings()
+  },
 
-    set((s) => ({
-      tabs: [...s.tabs, tab],
-      activeTabId: tab.id
-    }))
-
-    await window.logViewer.invoke(IPC_INVOKE.TAIL_SET_FOLLOW, result.sessionId, true)
+  openFileInNewTab: async (path: string) => {
+    await createTabFromPath(path, set)
+    await get().loadSettings()
   },
 
   openFileDialog: async () => {
     const path = await window.logViewer.invoke(IPC_INVOKE.DIALOG_OPEN_FILE)
     if (path) await get().openFile(path)
+  },
+
+  openFileDialogInNewTab: async () => {
+    const path = await window.logViewer.invoke(IPC_INVOKE.DIALOG_OPEN_FILE)
+    if (path) await get().openFileInNewTab(path)
   },
 
   closeTab: async (tabId: string) => {
@@ -211,35 +235,43 @@ export const useTabStore = create<TabStore>((set, get) => ({
     set({ settings })
   },
 
-  scrollToLine: (tabId, lineNumber) => {
+  scrollToLine: (tabId, lineNumber, column) => {
     set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, scrollTargetLine: lineNumber } : t))
+      tabs: s.tabs.map((t) =>
+        t.id === tabId
+          ? { ...t, scrollTargetLine: lineNumber, scrollTargetColumn: column ?? null }
+          : t
+      )
     }))
   },
 
   consumeScrollTarget: (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId)
-    const target = tab?.scrollTargetLine ?? null
-    if (target !== null) {
+    const line = tab?.scrollTargetLine ?? null
+    const column = tab?.scrollTargetColumn ?? null
+    if (line !== null) {
       set((s) => ({
-        tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, scrollTargetLine: null } : t))
+        tabs: s.tabs.map((t) =>
+          t.id === tabId ? { ...t, scrollTargetLine: null, scrollTargetColumn: null } : t
+        )
       }))
     }
-    return target
+    return line !== null ? { line, column } : null
   },
 
-  gotoLine: (tabId, lineOneBased) => {
+  gotoLine: (tabId, lineOneBased, columnOneBased) => {
     const tab = get().tabs.find((t) => t.id === tabId)
     if (!tab) return
 
     const lineNumber = Math.max(0, Math.min(lineOneBased - 1, Math.max(tab.lineCount - 1, 0)))
+    const column = columnOneBased !== undefined ? Math.max(0, columnOneBased - 1) : undefined
     const atTail = lineNumber >= tab.lineCount - 1
 
     if (!atTail && tab.followPinned) {
       get().setFollowPinned(tabId, false)
     }
 
-    get().scrollToLine(tabId, lineNumber)
+    get().scrollToLine(tabId, lineNumber, column)
   }
 }))
 

@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
+import { basename } from 'path'
 import { join } from 'path'
 import type ElectronStore from 'electron-store'
 import { IPC_EVENT, IPC_INVOKE } from '@shared/ipc'
-import { DEFAULT_SETTINGS, type AppSettings, type SearchOptions } from '@shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type SearchOptions, type SettingsExportPayload } from '@shared/types'
 import { SessionManager } from '../services/file-session'
 
 const isDev = !app.isPackaged
@@ -32,6 +33,24 @@ function addRecentFile(filePath: string): void {
   const settings = getSettings()
   const recent = [filePath, ...settings.recentFiles.filter((f) => f !== filePath)].slice(0, 10)
   saveSettings({ recentFiles: recent })
+  refreshMenu()
+}
+
+function formatRecentLabel(filePath: string): string {
+  const name = basename(filePath)
+  if (filePath.length <= 72) return filePath
+  return `${name} — …${filePath.slice(-56)}`
+}
+
+function buildRecentSubmenu(): Electron.MenuItemConstructorOptions[] {
+  const recent = getSettings().recentFiles
+  if (recent.length === 0) {
+    return [{ label: 'No Recent Files', enabled: false }]
+  }
+  return recent.map((filePath) => ({
+    label: formatRecentLabel(filePath),
+    click: () => mainWindow?.webContents.send('menu:open-path-new-tab', filePath)
+  }))
 }
 
 function wireSessionEvents(sessionId: string): void {
@@ -63,7 +82,12 @@ function wireSessionEvents(sessionId: string): void {
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_INVOKE.FILE_OPEN, async (_e, filePath: string) => {
-    const session = await sessionManager.open(filePath)
+    const settings = getSettings()
+    const session = await sessionManager.open(filePath, {
+      encodingOverride: settings.encoding,
+      usePolling: settings.usePolling,
+      pollIntervalMs: settings.pollIntervalMs
+    })
     wireSessionEvents(session.id)
     addRecentFile(filePath)
     return session.start()
@@ -133,6 +157,29 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_INVOKE.SEARCH_GET_STATE, (_e, sessionId: string) => {
     return sessionManager.get(sessionId)?.getSearchState() ?? null
   })
+
+  ipcMain.handle(IPC_INVOKE.SETTINGS_EXPORT, () => {
+    const payload: SettingsExportPayload = {
+      version: 1,
+      settings: getSettings(),
+      exportedAt: new Date().toISOString()
+    }
+    return payload
+  })
+
+  ipcMain.handle(IPC_INVOKE.SETTINGS_IMPORT, (_e, payload: SettingsExportPayload) => {
+    if (!payload?.settings) throw new Error('Invalid settings payload')
+    const merged = { ...DEFAULT_SETTINGS, ...payload.settings }
+    store.set('settings', merged)
+    refreshMenu()
+    return merged
+  })
+
+  ipcMain.handle(IPC_INVOKE.MINIMAP_SAMPLES, async (_e, sessionId: string, maxSamples: number) => {
+    const session = sessionManager.get(sessionId)
+    if (!session) throw new Error('Session not found')
+    return session.getMinimapSamples(maxSamples)
+  })
 }
 
 function buildMenu(): void {
@@ -164,6 +211,15 @@ function buildMenu(): void {
           label: 'Open…',
           accelerator: 'CmdOrCtrl+O',
           click: () => mainWindow?.webContents.send('menu:open-file')
+        },
+        {
+          label: 'Open in New Tab…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => mainWindow?.webContents.send('menu:open-file-new-tab')
+        },
+        {
+          label: 'Open Recent',
+          submenu: buildRecentSubmenu()
         },
         {
           label: 'Close Tab',
@@ -210,6 +266,10 @@ function buildMenu(): void {
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+export function refreshMenu(): void {
+  buildMenu()
 }
 
 export function createWindow(): void {
