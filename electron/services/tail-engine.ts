@@ -253,9 +253,13 @@ export class TailEngine extends EventEmitter {
   private async handleRotation(): Promise<void> {
     await this.watcher?.close()
     this.watcher = null
-    await new Promise((r) => setTimeout(r, 150))
 
-    const access = await RangeReader.checkAccess(this.filePath)
+    let access = await RangeReader.checkAccess(this.filePath)
+    for (let attempt = 0; !access.ok && attempt < 8; attempt++) {
+      await new Promise((r) => setTimeout(r, 150))
+      access = await RangeReader.checkAccess(this.filePath)
+    }
+
     if (!access.ok) {
       this.emit('error', { message: access.message })
       return

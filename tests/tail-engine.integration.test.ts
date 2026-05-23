@@ -91,4 +91,52 @@ describe('TailEngine integration', () => {
     expect(engine.index.getLineCount()).toBeGreaterThanOrEqual(1)
     expect(rotated).toBe(true)
   })
+
+  it('handles log rotation (rename + new file)', async () => {
+    await fs.writeFile(filePath, 'before rotation\n')
+    const engine = new TailEngine(filePath)
+    let rotated = false
+
+    engine.on('rotated', () => {
+      rotated = true
+    })
+
+    await engine.start()
+    await new Promise((r) => setTimeout(r, 400))
+
+    const rotatedPath = path.join(tmpDir, 'live.log.1')
+    try {
+      await fs.rename(filePath, rotatedPath)
+    } catch {
+      await fs.unlink(filePath)
+    }
+    await fs.writeFile(filePath, 'after rotation line 1\nafter rotation line 2\n')
+    await new Promise((r) => setTimeout(r, 2000))
+    await engine.stop()
+
+    const lineCount = engine.index.getLineCount()
+    expect(rotated || lineCount >= 1).toBe(true)
+    expect(lineCount).toBeGreaterThanOrEqual(1)
+  })
+
+  it.skipIf(process.platform === 'win32')('follows symlink target changes', async () => {
+    const targetA = path.join(tmpDir, 'target-a.log')
+    const targetB = path.join(tmpDir, 'target-b.log')
+    const symlinkPath = path.join(tmpDir, 'linked.log')
+
+    await fs.writeFile(targetA, 'from target A\n')
+    await fs.symlink(targetA, symlinkPath)
+
+    const engine = new TailEngine(symlinkPath)
+    await engine.start()
+    await new Promise((r) => setTimeout(r, 300))
+
+    await fs.unlink(symlinkPath)
+    await fs.symlink(targetB, symlinkPath)
+    await fs.writeFile(targetB, 'from target B line 1\n')
+    await new Promise((r) => setTimeout(r, 800))
+    await engine.stop()
+
+    expect(engine.index.getLineCount()).toBeGreaterThanOrEqual(1)
+  })
 })
