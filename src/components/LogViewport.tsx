@@ -3,6 +3,8 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { IPC_INVOKE } from '@shared/ipc'
 import { LogLine } from '@/components/LogLine'
 import { useHighlightLines } from '@/hooks/useHighlightLines'
+import { mergeHighlightSegments, useSearchHighlightSegments } from '@/hooks/useSearchHighlights'
+import { useSearchStore } from '@/stores/searchStore'
 import { useTabStore } from '@/stores/tabStore'
 import { getVirtualTotalSize } from '@/lib/utils'
 
@@ -16,7 +18,11 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId))
   const cacheLines = useTabStore((s) => s.cacheLines)
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
+  const consumeScrollTarget = useTabStore((s) => s.consumeScrollTarget)
   const settings = useTabStore((s) => s.settings)
+
+  const searchMatches = useSearchStore((s) => s.matches)
+  const getCurrentMatch = useSearchStore((s) => s.getCurrentMatch)
 
   const parentRef = useRef<HTMLDivElement>(null)
   const followPinnedRef = useRef(tab?.followPinned ?? true)
@@ -49,6 +55,20 @@ export function LogViewport({ tabId }: LogViewportProps) {
     .filter((l): l is { lineNumber: number; text: string } => l !== null)
 
   const highlightSegments = useHighlightLines(visibleLines, settings?.highlightRules ?? [])
+
+  const currentMatch = getCurrentMatch()
+  const searchHighlightSegments = useSearchHighlightSegments(
+    virtualItems.map((vi) => vi.index),
+    searchMatches,
+    currentMatch
+  )
+
+  useEffect(() => {
+    const target = consumeScrollTarget(tabId)
+    if (target !== null) {
+      virtualizer.scrollToIndex(target, { align: 'center' })
+    }
+  }, [tab?.scrollTargetLine, tabId, consumeScrollTarget, virtualizer])
 
   const fetchLines = useCallback(
     async (startLine: number, count: number) => {
@@ -118,7 +138,10 @@ export function LogViewport({ tabId }: LogViewportProps) {
       <div style={{ height: totalSize, width: '100%', position: 'relative' }}>
         {virtualItems.map((vi) => {
           const text = tab.lineCache.get(vi.index) ?? ''
-          const segments = highlightSegments.get(vi.index) ?? []
+          const ruleSegments = highlightSegments.get(vi.index) ?? []
+          const searchSegments = searchHighlightSegments.get(vi.index) ?? []
+          const segments = mergeHighlightSegments(ruleSegments, searchSegments)
+          const isCurrentMatchLine = currentMatch?.lineNumber === vi.index
 
           return (
             <div
@@ -138,6 +161,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
                 fontSize={fontSize}
                 fontFamily={fontFamily}
                 segments={segments}
+                isCurrentMatchLine={isCurrentMatchLine}
               />
             </div>
           )

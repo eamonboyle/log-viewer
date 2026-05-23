@@ -2,13 +2,15 @@
 
 Modern cross-platform desktop log viewer built with Electron, React, and TypeScript. Optimized for multi-GB files with a **watch-first tail engine** — external file writes appear automatically with no "click to refresh" prompts.
 
-## Features (MVP)
+## Features
 
 - **Live tail by default** — chokidar watch starts on file open; new lines push via IPC
 - **Follow mode** — ON by default; auto-scroll when pinned; badge when paused
 - **Virtual scroll** — `@tanstack/react-virtual` renders only visible rows
 - **Multi-tab** — independent sessions per file (Zustand)
 - **Highlight rules** — string/regex patterns via Web Worker
+- **Find in file** — ripgrep-powered search with match navigation and in-line highlights
+- **Go to line** — jump to any line number (pauses follow when leaving tail)
 - **Sparse line index** — byte-offset index in main process; O(viewport) memory
 
 ## Architecture
@@ -63,14 +65,21 @@ Open `live.log` in the app and run the rate generator to verify live tail withou
 |----------|--------|
 | Ctrl+O | Open file |
 | Ctrl+W | Close tab |
+| Ctrl+F | Find in file |
+| Ctrl+G | Go to line |
+| Enter | Next search match (in search bar) |
+| Shift+Enter | Previous search match (in search bar) |
+| F3 | Next search match |
+| Shift+F3 | Previous search match |
+| Esc | Close search / go-to-line dialog |
 | End | Jump to tail (enable follow) |
 | F5 | Toggle follow |
 
 ## IPC Channels
 
-**Renderer → Main:** `file:open`, `file:close`, `tail:setFollow`, `viewport:readLines`, `index:getStatus`
+**Renderer → Main:** `file:open`, `file:close`, `tail:setFollow`, `viewport:readLines`, `index:getStatus`, `search:query`, `search:next`, `search:prev`, `search:cancel`, `search:getState`
 
-**Main → Renderer:** `tail:appended`, `index:progress`, `file:rotated`, `file:error`
+**Main → Renderer:** `tail:appended`, `index:progress`, `file:rotated`, `file:error`, `search:stale`
 
 ## License
 

@@ -91,6 +91,42 @@ export interface AppSettings {
   recentFiles: string[]
 }
 
+export interface SearchOptions {
+  caseSensitive: boolean
+  isRegex: boolean
+  wholeWord: boolean
+}
+
+export interface SearchMatch {
+  /** 0-based line number */
+  lineNumber: number
+  /** 0-based column (character offset in line) */
+  column: number
+  /** Match length in characters */
+  length: number
+}
+
+export interface SearchState {
+  query: string
+  options: SearchOptions
+  matches: SearchMatch[]
+  /** Index into matches array; -1 when no matches */
+  currentIndex: number
+  total: number
+  /** True when file grew since last search */
+  stale: boolean
+  /** File size at time of search */
+  fileSizeAtSearch: number
+  /** Set when search fails (e.g. ripgrep unavailable) */
+  error?: string | null
+}
+
+export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
+  caseSensitive: false,
+  isRegex: false,
+  wholeWord: false
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   fontSize: 13,

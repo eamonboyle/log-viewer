@@ -17,6 +17,8 @@ export interface TabSession {
   error: string | null
   /** Cached lines keyed by line number */
   lineCache: Map<number, string>
+  /** Line to scroll to (0-based); consumed by LogViewport */
+  scrollTargetLine: number | null
 }
 
 interface TabStore {
@@ -39,6 +41,9 @@ interface TabStore {
   getLine: (tabId: string, lineNumber: number) => string | undefined
   getActiveTab: () => TabSession | undefined
   updateHighlightRules: (rules: HighlightRule[]) => Promise<void>
+  scrollToLine: (tabId: string, lineNumber: number) => void
+  consumeScrollTarget: (tabId: string) => number | null
+  gotoLine: (tabId: string, lineOneBased: number) => void
 }
 
 function makeDisplayName(path: string): string {
@@ -77,7 +82,8 @@ export const useTabStore = create<TabStore>((set, get) => ({
       indexPercent: 0,
       indexComplete: false,
       error: null,
-      lineCache: new Map()
+      lineCache: new Map(),
+      scrollTargetLine: null
     }
 
     set((s) => ({
@@ -203,6 +209,37 @@ export const useTabStore = create<TabStore>((set, get) => ({
   updateHighlightRules: async (rules: HighlightRule[]) => {
     const settings = await window.logViewer.invoke(IPC_INVOKE.SETTINGS_SET, { highlightRules: rules })
     set({ settings })
+  },
+
+  scrollToLine: (tabId, lineNumber) => {
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, scrollTargetLine: lineNumber } : t))
+    }))
+  },
+
+  consumeScrollTarget: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId)
+    const target = tab?.scrollTargetLine ?? null
+    if (target !== null) {
+      set((s) => ({
+        tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, scrollTargetLine: null } : t))
+      }))
+    }
+    return target
+  },
+
+  gotoLine: (tabId, lineOneBased) => {
+    const tab = get().tabs.find((t) => t.id === tabId)
+    if (!tab) return
+
+    const lineNumber = Math.max(0, Math.min(lineOneBased - 1, Math.max(tab.lineCount - 1, 0)))
+    const atTail = lineNumber >= tab.lineCount - 1
+
+    if (!atTail && tab.followPinned) {
+      get().setFollowPinned(tabId, false)
+    }
+
+    get().scrollToLine(tabId, lineNumber)
   }
 }))
 

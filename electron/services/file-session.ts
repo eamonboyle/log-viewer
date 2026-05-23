@@ -1,15 +1,30 @@
 import { randomUUID } from 'crypto'
-import type { FileOpenResult, IndexStatus, LineBatch } from '@shared/types'
+import type { FileOpenResult, IndexStatus, LineBatch, SearchOptions, SearchState } from '@shared/types'
 import { TailEngine } from './tail-engine'
+import { SearchService } from './search-service'
 
 export class FileSession {
   readonly id: string
   readonly tailEngine: TailEngine
+  readonly searchService: SearchService
   private started = false
+  private onSearchStale: ((sessionId: string, fileSize: number) => void) | null = null
 
   constructor(readonly filePath: string) {
     this.id = randomUUID()
     this.tailEngine = new TailEngine(filePath)
+    this.searchService = new SearchService()
+
+    this.tailEngine.on('appended', () => {
+      const fileSize = this.tailEngine.index.getStatus().fileSize
+      if (this.searchService.updateFileSize(fileSize)) {
+        this.onSearchStale?.(this.id, fileSize)
+      }
+    })
+  }
+
+  setSearchStaleHandler(handler: (sessionId: string, fileSize: number) => void): void {
+    this.onSearchStale = handler
   }
 
   get displayName(): string {
@@ -33,6 +48,7 @@ export class FileSession {
   }
 
   async close(): Promise<void> {
+    this.searchService.cancel()
     await this.tailEngine.stop()
   }
 
@@ -50,6 +66,27 @@ export class FileSession {
 
   getIndexStatus(): IndexStatus {
     return this.tailEngine.index.getStatus()
+  }
+
+  async searchQuery(query: string, options: SearchOptions): Promise<SearchState> {
+    const { fileSize } = this.getIndexStatus()
+    return this.searchService.query(this.filePath, query, options, fileSize)
+  }
+
+  searchNext(): SearchState | null {
+    return this.searchService.next()
+  }
+
+  searchPrev(): SearchState | null {
+    return this.searchService.prev()
+  }
+
+  searchCancel(): void {
+    this.searchService.cancel()
+  }
+
+  getSearchState(): SearchState | null {
+    return this.searchService.getState()
   }
 }
 

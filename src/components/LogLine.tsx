@@ -9,6 +9,7 @@ interface LogLineProps {
   fontSize: number
   fontFamily: string
   segments?: HighlightSegment[]
+  isCurrentMatchLine?: boolean
 }
 
 function renderSegments(text: string, segments: HighlightSegment[]): React.ReactNode {
@@ -43,11 +44,15 @@ export const LogLine = memo(function LogLine({
   rowHeight,
   fontSize,
   fontFamily,
-  segments = []
+  segments = [],
+  isCurrentMatchLine = false
 }: LogLineProps) {
   return (
     <div
-      className="flex w-full items-start border-b border-border/30 px-2 hover:bg-accent/30"
+      className={cn(
+        'flex w-full items-start border-b border-border/30 px-2 hover:bg-accent/30',
+        isCurrentMatchLine && 'bg-accent/50'
+      )}
       style={{ height: rowHeight, fontSize, fontFamily, lineHeight: `${rowHeight}px` }}
     >
       <span className="mr-3 w-16 shrink-0 select-none text-right text-muted-foreground tabular-nums">

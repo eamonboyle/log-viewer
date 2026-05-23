@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { IPC_EVENT } from '@shared/ipc'
 import type { TailAppendedPayload, IndexProgressPayload, FileErrorPayload } from '@shared/types'
+import { useGoToLineStore } from '@/stores/goToLineStore'
+import { useSearchStore } from '@/stores/searchStore'
 import { useTabStore } from '@/stores/tabStore'
 
 export function useTailEvents(): void {
@@ -21,6 +23,12 @@ export function useTailEvents(): void {
       window.logViewer.on(IPC_EVENT.FILE_ERROR, (sessionId, payload) => {
         const p = payload as FileErrorPayload
         setError(sessionId, p.message)
+      }),
+      window.logViewer.on(IPC_EVENT.FILE_ROTATED, (sessionId) => {
+        const tab = useTabStore.getState().tabs.find((t) => t.sessionId === sessionId)
+        if (tab && useSearchStore.getState().total > 0) {
+          useSearchStore.getState().markStale()
+        }
       })
     ]
 
@@ -35,6 +43,8 @@ export function useMenuShortcuts(): void {
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const openFile = useTabStore((s) => s.openFile)
+  const openSearch = useSearchStore((s) => s.open)
+  const openGoToLine = useGoToLineStore((s) => s.open)
 
   useEffect(() => {
     const unsubs = [
@@ -48,10 +58,12 @@ export function useMenuShortcuts(): void {
       window.logViewer.onMenu('menu:jump-end', () => {
         if (activeTabId) setFollowPinned(activeTabId, true)
       }),
+      window.logViewer.onMenu('menu:find', () => openSearch()),
+      window.logViewer.onMenu('menu:goto-line', () => openGoToLine()),
       window.logViewer.onMenuPath('menu:open-path', (path) => void openFile(path))
     ]
     return () => unsubs.forEach((u) => u())
-  }, [openFileDialog, closeTab, toggleFollow, setFollowPinned, activeTabId, openFile])
+  }, [openFileDialog, closeTab, toggleFollow, setFollowPinned, activeTabId, openFile, openSearch, openGoToLine])
 }
 
 export function useKeyboardShortcuts(): void {
@@ -60,9 +72,51 @@ export function useKeyboardShortcuts(): void {
   const toggleFollow = useTabStore((s) => s.toggleFollow)
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
   const activeTabId = useTabStore((s) => s.activeTabId)
+  const openSearch = useSearchStore((s) => s.open)
+  const closeSearch = useSearchStore((s) => s.close)
+  const isSearchOpen = useSearchStore((s) => s.isOpen)
+  const nextMatch = useSearchStore((s) => s.nextMatch)
+  const prevMatch = useSearchStore((s) => s.prevMatch)
+  const openGoToLine = useGoToLineStore((s) => s.open)
+  const closeGoToLine = useGoToLineStore((s) => s.close)
+  const isGoToLineOpen = useGoToLineStore((s) => s.isOpen)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault()
+        openSearch()
+        return
+      }
+      if (e.ctrlKey && e.key === 'g') {
+        e.preventDefault()
+        openGoToLine()
+        return
+      }
+      if (e.key === 'F3') {
+        e.preventDefault()
+        if (e.shiftKey) void prevMatch()
+        else void nextMatch()
+        return
+      }
+      if (e.key === 'Escape') {
+        if (isSearchOpen) {
+          e.preventDefault()
+          closeSearch()
+          return
+        }
+        if (isGoToLineOpen) {
+          e.preventDefault()
+          closeGoToLine()
+          return
+        }
+      }
+
+      if (inInput) return
+
       if (e.ctrlKey && e.key === 'o') {
         e.preventDefault()
         void openFileDialog()
@@ -82,5 +136,19 @@ export function useKeyboardShortcuts(): void {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [openFileDialog, closeTab, toggleFollow, setFollowPinned, activeTabId])
+  }, [
+    openFileDialog,
+    closeTab,
+    toggleFollow,
+    setFollowPinned,
+    activeTabId,
+    openSearch,
+    closeSearch,
+    isSearchOpen,
+    nextMatch,
+    prevMatch,
+    openGoToLine,
+    closeGoToLine,
+    isGoToLineOpen
+  ])
 }

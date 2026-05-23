@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import { join } from 'path'
 import type ElectronStore from 'electron-store'
 import { IPC_EVENT, IPC_INVOKE } from '@shared/ipc'
-import { DEFAULT_SETTINGS, type AppSettings } from '@shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type SearchOptions } from '@shared/types'
 import { SessionManager } from '../services/file-session'
 
 const isDev = !app.isPackaged
@@ -55,6 +55,10 @@ function wireSessionEvents(sessionId: string): void {
   tailEngine.on('error', (payload) => {
     mainWindow?.webContents.send(IPC_EVENT.FILE_ERROR, sessionId, payload)
   })
+
+  session.setSearchStaleHandler((sid, fileSize) => {
+    mainWindow?.webContents.send(IPC_EVENT.SEARCH_STALE, sid, { fileSize })
+  })
 }
 
 function registerIpcHandlers(): void {
@@ -100,6 +104,35 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_INVOKE.SETTINGS_GET, () => getSettings())
 
   ipcMain.handle(IPC_INVOKE.SETTINGS_SET, (_e, partial: Partial<AppSettings>) => saveSettings(partial))
+
+  ipcMain.handle(
+    IPC_INVOKE.SEARCH_QUERY,
+    async (_e, sessionId: string, query: string, options: SearchOptions) => {
+      const session = sessionManager.get(sessionId)
+      if (!session) throw new Error('Session not found')
+      return session.searchQuery(query, options)
+    }
+  )
+
+  ipcMain.handle(IPC_INVOKE.SEARCH_NEXT, (_e, sessionId: string) => {
+    const session = sessionManager.get(sessionId)
+    if (!session) throw new Error('Session not found')
+    return session.searchNext()
+  })
+
+  ipcMain.handle(IPC_INVOKE.SEARCH_PREV, (_e, sessionId: string) => {
+    const session = sessionManager.get(sessionId)
+    if (!session) throw new Error('Session not found')
+    return session.searchPrev()
+  })
+
+  ipcMain.handle(IPC_INVOKE.SEARCH_CANCEL, (_e, sessionId: string) => {
+    sessionManager.get(sessionId)?.searchCancel()
+  })
+
+  ipcMain.handle(IPC_INVOKE.SEARCH_GET_STATE, (_e, sessionId: string) => {
+    return sessionManager.get(sessionId)?.getSearchState() ?? null
+  })
 }
 
 function buildMenu(): void {
@@ -144,6 +177,17 @@ function buildMenu(): void {
     {
       label: 'View',
       submenu: [
+        {
+          label: 'Find…',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => mainWindow?.webContents.send('menu:find')
+        },
+        {
+          label: 'Go to Line…',
+          accelerator: 'CmdOrCtrl+G',
+          click: () => mainWindow?.webContents.send('menu:goto-line')
+        },
+        { type: 'separator' },
         {
           label: 'Toggle Follow',
           accelerator: 'F5',

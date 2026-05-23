@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
+import { GoToLineDialog } from '@/components/GoToLineDialog'
 import { LogViewport } from '@/components/LogViewport'
+import { SearchBar } from '@/components/SearchBar'
 import { StatusBar } from '@/components/StatusBar'
 import { TabStrip } from '@/components/TabStrip'
 import { Toolbar } from '@/components/Toolbar'
 import { useKeyboardShortcuts, useMenuShortcuts, useTailEvents } from '@/hooks/useTailEvents'
+import { subscribeSearchStaleEvents } from '@/stores/searchStore'
 import { useTabStore } from '@/stores/tabStore'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +25,8 @@ export default function App() {
   useEffect(() => {
     void loadSettings()
   }, [loadSettings])
+
+  useEffect(() => subscribeSearchStaleEvents(), [])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -53,6 +58,8 @@ export default function App() {
       <Toolbar />
 
       <main className={cn('relative flex-1 overflow-hidden', dragOver && 'ring-2 ring-inset ring-primary')}>
+        <SearchBar />
+        <GoToLineDialog />
         {activeTab ? (
           <LogViewport key={activeTab.id} tabId={activeTab.id} />
         ) : (

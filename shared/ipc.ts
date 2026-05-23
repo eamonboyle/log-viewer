@@ -5,6 +5,8 @@ import type {
   IndexProgressPayload,
   IndexStatus,
   LineBatch,
+  SearchOptions,
+  SearchState,
   TailAppendedPayload
 } from './types'
 
@@ -17,7 +19,12 @@ export const IPC_INVOKE = {
   INDEX_GET_STATUS: 'index:getStatus',
   DIALOG_OPEN_FILE: 'dialog:openFile',
   SETTINGS_GET: 'settings:get',
-  SETTINGS_SET: 'settings:set'
+  SETTINGS_SET: 'settings:set',
+  SEARCH_QUERY: 'search:query',
+  SEARCH_NEXT: 'search:next',
+  SEARCH_PREV: 'search:prev',
+  SEARCH_CANCEL: 'search:cancel',
+  SEARCH_GET_STATE: 'search:getState'
 } as const
 
 /** Main → Renderer push channels */
@@ -25,7 +32,8 @@ export const IPC_EVENT = {
   TAIL_APPENDED: 'tail:appended',
   INDEX_PROGRESS: 'index:progress',
   FILE_ROTATED: 'file:rotated',
-  FILE_ERROR: 'file:error'
+  FILE_ERROR: 'file:error',
+  SEARCH_STALE: 'search:stale'
 } as const
 
 export type IpcInvokeChannel = (typeof IPC_INVOKE)[keyof typeof IPC_INVOKE]
@@ -64,6 +72,26 @@ export interface IpcInvokeMap {
     args: [partial: Partial<import('./types').AppSettings>]
     result: import('./types').AppSettings
   }
+  [IPC_INVOKE.SEARCH_QUERY]: {
+    args: [sessionId: string, query: string, options: SearchOptions]
+    result: SearchState
+  }
+  [IPC_INVOKE.SEARCH_NEXT]: {
+    args: [sessionId: string]
+    result: SearchState | null
+  }
+  [IPC_INVOKE.SEARCH_PREV]: {
+    args: [sessionId: string]
+    result: SearchState | null
+  }
+  [IPC_INVOKE.SEARCH_CANCEL]: {
+    args: [sessionId: string]
+    result: void
+  }
+  [IPC_INVOKE.SEARCH_GET_STATE]: {
+    args: [sessionId: string]
+    result: SearchState | null
+  }
 }
 
 export interface IpcEventMap {
@@ -82,6 +110,10 @@ export interface IpcEventMap {
   [IPC_EVENT.FILE_ERROR]: {
     sessionId: string
     payload: FileErrorPayload
+  }
+  [IPC_EVENT.SEARCH_STALE]: {
+    sessionId: string
+    payload: { fileSize: number }
   }
 }
 
