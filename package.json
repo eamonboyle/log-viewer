@@ -78,6 +78,7 @@
       "artifactName": "${productName}-${version}-mac.${ext}"
     },
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "portable",

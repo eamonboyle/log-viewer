@@ -25,6 +25,7 @@ First stable release — cross-platform desktop log viewer with watch-first tail
 - **Settings export/import** — JSON prefs backup
 - **Auto-update check** — Help → Check for Updates (GitHub Releases provider)
 - **UNC path support** — auto polling for network shares on Windows
+- **Line filters** — sidebar level toggles (INFO/WARN/ERROR/DEBUG), quick presets (errors only, warnings only, hide Microsoft logs), batched background scan with progress, filtered virtual scroll + status bar line count
 
 ### Fixes & hardening
 
@@ -51,5 +52,7 @@ First stable release — cross-platform desktop log viewer with watch-first tail
 - Column detection MVP: tab-delimited only
 - Code signing optional — OS warnings until signed
 - Auto-update: manual check on v1; no silent install
+- Time range filter UI present but disabled (coming in v1.1)
+- Level counts in sidebar reflect cached viewport lines until full scan completes
 
 [1.0.0]: https://github.com/log-viewer/log-viewer/releases/tag/v1.0.0

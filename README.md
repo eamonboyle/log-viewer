@@ -30,6 +30,7 @@ Unsigned builds may show SmartScreen (Windows) or Gatekeeper (macOS) warnings un
 - **Settings export/import** — JSON backup of preferences
 - **UNC path support** — auto polling for `\\server\share` paths on Windows
 - **Auto-update check** — Help → Check for Updates (packaged builds)
+- **Line filters** — sidebar level toggles and quick presets; batched scan with filtered virtual scroll
 
 ## Architecture
 

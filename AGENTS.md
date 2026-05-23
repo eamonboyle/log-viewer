@@ -38,7 +38,7 @@ Do not commit `node_modules/`, `out/`, `release/`, `*.log`, or secrets (`.env`, 
 
 ## v1.0.0 milestone
 
-Shipped May 2026. Key additions over MVP: multi-window with session→window IPC routing, search-as-you-type, go-to-column scroll, tab reorder, light theme, per-file highlight globs, tab-delimited column detection, CI/release workflows, and cross-platform packaging with auto-update check.
+Shipped May 2026. Key additions over MVP: multi-window with session→window IPC routing, search-as-you-type, go-to-column scroll, tab reorder, light theme, per-file highlight globs, tab-delimited column detection, line filters with level/quick presets, CI/release workflows, and cross-platform packaging with auto-update check.
 
 ## Git commit conventions
 

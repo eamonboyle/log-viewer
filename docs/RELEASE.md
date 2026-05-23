@@ -18,8 +18,11 @@ npm run gen-log -- --lines 10000 --rate 1000 --wide --output ./live-wide.log
 | 10M lines | Open file + scroll to middle < 3s perceived |
 | Live tail | Append at 1k lines/s for 5 min — no refresh prompt, no obvious memory leak |
 | Wide lines | `--wide` log with wrap off — horizontal scroll works for go-to-column |
+| Filter on 150k+ | Level filter scan completes; scroll filtered view is usable |
 
 Automated smoke (CI): `tests/large-file.perf.test.ts` indexes 1M lines with heap bound check.
+
+Local automated verification (2026-05-23): typecheck, vitest (33 passed), build, and `150k` perf log generated. Packaged win-unpacked launch smoke-tested with `perf-150k.log`.
 
 ## Platform QA matrix
 
@@ -43,10 +46,17 @@ Automated smoke (CI): `tests/large-file.perf.test.ts` indexes 1M lines with heap
 - [ ] Settings export/import
 - [ ] Minimap jump
 - [ ] Help → Check for Updates (packaged build)
+- [ ] Toggle level filters — viewport shows subset; status bar shows "N of M lines"
+- [ ] Quick filter presets (errors only / warnings only / hide Microsoft)
+- [ ] Filter scan progress indicator; follow resumes after scan
+- [ ] Live tail appends new lines into active filter index
+- [ ] Go-to-line works with filter active
+- [ ] Close tab clears filter state (reopen file starts fresh)
+- [ ] Empty filter result shows "No lines match the current filters"
 
 ### Windows
 
-- [ ] Portable exe launches
+- [x] Portable/unpacked exe launches (win-unpacked smoke test)
 - [ ] NSIS installer (if built)
 - [ ] UNC path with polling auto-enabled
 - [ ] Drag-drop file onto window
@@ -54,13 +64,13 @@ Automated smoke (CI): `tests/large-file.perf.test.ts` indexes 1M lines with heap
 ### macOS
 
 - [ ] Open file from Finder (double-click / open-with) targets focused window
-- [ ] dmg + zip artifacts open
+- [ ] dmg + zip artifacts open (CI build matrix)
 - [ ] Cmd+O / Cmd+W shortcuts
 
 ### Linux
 
-- [ ] AppImage runs
-- [ ] deb package installs
+- [ ] AppImage runs (CI build matrix)
+- [ ] deb package installs (CI build matrix)
 
 ## Packaging smoke
 
@@ -73,9 +83,9 @@ npm run dist   # or npm run pack for faster local check
 
 Packaged app checks:
 
-- [ ] App icon visible
-- [ ] Ripgrep search works (asarUnpack verified)
-- [ ] Index worker loads (no inline fallback in production)
+- [x] App icon visible
+- [x] Ripgrep search works (asarUnpack verified)
+- [x] Index worker loads (no inline fallback in production)
 - [ ] Multi-window — tail events only in owning window
 
 ## Release steps
@@ -93,3 +103,5 @@ Packaged app checks:
 - Column detection MVP: tab-delimited only
 - Code signing optional — SmartScreen / Gatekeeper warnings until signed
 - Auto-update v1: check only, no silent install
+- Time range filter UI present but disabled (coming in v1.1)
+- Level counts in sidebar reflect cached viewport lines until full scan completes
