@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { HighlightRule, HighlightSegment } from '@shared/types'
+import { filterRulesForPath } from '@/lib/glob'
 
 interface HighlightWorkerRequest {
   id: number
@@ -32,44 +33,62 @@ function getWorker(): Worker {
   return worker
 }
 
+function linesSignature(lines: { lineNumber: number; text: string }[]): string {
+  return lines.map((l) => `${l.lineNumber}:${l.text.length}:${l.text.slice(0, 32)}`).join('|')
+}
+
 export function useHighlightLines(
   lines: { lineNumber: number; text: string }[],
-  rules: HighlightRule[]
+  rules: HighlightRule[],
+  filePath?: string
 ): Map<number, HighlightSegment[]> {
   const [segments, setSegments] = useState<Map<number, HighlightSegment[]>>(new Map())
   const rulesRef = useRef(rules)
-  rulesRef.current = rules
+  const filePathRef = useRef(filePath)
+  const lastSignatureRef = useRef('')
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const highlight = useCallback(async () => {
+  rulesRef.current = rules
+  filePathRef.current = filePath
+
+  useEffect(() => {
+    const signature = linesSignature(lines)
+    if (signature === lastSignatureRef.current) return
+    lastSignatureRef.current = signature
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
     if (lines.length === 0) {
       setSegments(new Map())
       return
     }
 
-    const id = ++requestId
-    const w = getWorker()
+    debounceRef.current = setTimeout(() => {
+      const applicableRules = filterRulesForPath(rulesRef.current, filePathRef.current)
+      const id = ++requestId
+      const w = getWorker()
 
-    return new Promise<void>((resolve) => {
       pending.set(id, (results) => {
-        const map = new Map<number, HighlightSegment[]>()
-        for (const r of results) {
-          map.set(r.lineNumber, r.segments)
-        }
-        setSegments(map)
-        resolve()
+        setSegments((prev) => {
+          const next = new Map(prev)
+          for (const r of results) {
+            next.set(r.lineNumber, r.segments)
+          }
+          return next
+        })
       })
 
       w.postMessage({
         id,
         lines,
-        rules: rulesRef.current
+        rules: applicableRules
       } satisfies HighlightWorkerRequest)
-    })
-  }, [lines, rules])
+    }, 32)
 
-  useEffect(() => {
-    void highlight()
-  }, [highlight])
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [lines, rules, filePath])
 
   return segments
 }

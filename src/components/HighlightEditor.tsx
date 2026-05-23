@@ -41,6 +41,12 @@ export function HighlightEditor({ rules, onSave, onClose }: HighlightEditorProps
           {localRules.map((rule) => (
             <div key={rule.id} className="flex flex-wrap items-center gap-2 rounded border border-border p-2">
               <input
+                className="min-w-[80px] flex-1 rounded border border-input bg-background px-2 py-1 text-sm"
+                value={rule.filePattern ?? ''}
+                placeholder="File glob (optional)"
+                onChange={(e) => updateRule(rule.id, { filePattern: e.target.value || undefined })}
+              />
+              <input
                 className="min-w-[120px] flex-1 rounded border border-input bg-background px-2 py-1 text-sm"
                 value={rule.pattern}
                 placeholder="Pattern"
