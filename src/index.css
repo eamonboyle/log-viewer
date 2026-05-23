@@ -115,3 +115,34 @@ body {
 ::selection {
   background: color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
+
+/* Interactive elements */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+a[href],
+select:not(:disabled),
+summary,
+input[type='checkbox']:not(:disabled),
+input[type='radio']:not(:disabled),
+input[type='color']:not(:disabled),
+input[type='range']:not(:disabled),
+label:has(input[type='checkbox']),
+label:has(input[type='radio']),
+label:has(button),
+label:has([role='switch']) {
+  cursor: pointer;
+}
+
+button[draggable='true']:not(:disabled) {
+  cursor: grab;
+}
+
+button[draggable='true']:not(:disabled):active {
+  cursor: grabbing;
+}
+
+button:disabled,
+select:disabled,
+[disabled] {
+  cursor: not-allowed;
+}
