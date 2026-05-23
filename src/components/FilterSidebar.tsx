@@ -1,22 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Search, Calendar, ChevronRight, ChevronDown } from 'lucide-react'
+import { ALL_LEVELS, classifyLevel, type LogLevel, type QuickFilter } from '@/lib/logFilter'
+import { useFilterStore } from '@/stores/filterStore'
 import { useTabStore } from '@/stores/tabStore'
-import { useSearchStore } from '@/stores/searchStore'
 import { cn } from '@/lib/utils'
-
-const LEVEL_REGEX = /\b(ERROR|FATAL|CRITICAL|WARN(?:ING)?|INFO|DEBUG|TRACE|VERBOSE)\b/i
-
-type LogLevel = 'ERROR' | 'WARN' | 'INFO' | 'DEBUG'
-
-function classifyLevel(line: string): LogLevel | null {
-  const m = LEVEL_REGEX.exec(line)
-  if (!m) return null
-  const l = m[1].toUpperCase()
-  if (l === 'ERROR' || l === 'FATAL' || l === 'CRITICAL') return 'ERROR'
-  if (l === 'WARN' || l === 'WARNING') return 'WARN'
-  if (l === 'INFO') return 'INFO'
-  return 'DEBUG'
-}
 
 const LEVEL_META: Record<LogLevel, { label: string; dotClass: string; textClass: string; bgClass: string }> = {
   INFO: {
@@ -45,9 +32,11 @@ const LEVEL_META: Record<LogLevel, { label: string; dotClass: string; textClass:
   }
 }
 
-interface FilterState {
-  levels: Set<LogLevel>
-}
+const QUICK_FILTERS: { label: string; id: QuickFilter }[] = [
+  { label: 'Errors only', id: 'errors-only' },
+  { label: 'Warnings only', id: 'warnings-only' },
+  { label: 'Hide Microsoft logs', id: 'hide-microsoft' }
+]
 
 function SectionHeader({
   label,
@@ -78,17 +67,21 @@ function SectionHeader({
 
 export function FilterSidebar() {
   const tab = useTabStore((s) => s.getActiveTab())
-  const setQuery = useSearchStore((s) => s.setQuery)
-  const runSearch = useSearchStore((s) => s.runSearch)
-  const openSearch = useSearchStore((s) => s.open)
+  const filter = useFilterStore((s) => (tab ? s.getFilter(tab.id) : null))
+  const filterIndex = useFilterStore((s) => (tab ? s.getIndex(tab.id) : null))
+  const toggleLevel = useFilterStore((s) => s.toggleLevel)
+  const setQuickFilter = useFilterStore((s) => s.setQuickFilter)
 
-  const [filter, setFilter] = useState<FilterState>({
-    levels: new Set(['INFO', 'WARN', 'ERROR', 'DEBUG'])
-  })
   const [levelsExpanded, setLevelsExpanded] = useState(true)
   const [timeExpanded, setTimeExpanded] = useState(true)
   const [quickExpanded, setQuickExpanded] = useState(true)
-  const [activeQuickFilter, setActiveQuickFilter] = useState<string | null>(null)
+
+  const activeLevels = useMemo(() => {
+    if (!filter) return new Set(ALL_LEVELS)
+    if (filter.quickFilter === 'errors-only') return new Set<LogLevel>(['ERROR'])
+    if (filter.quickFilter === 'warnings-only') return new Set<LogLevel>(['WARN'])
+    return new Set(filter.levels)
+  }, [filter])
 
   const levelCounts = useMemo(() => {
     const counts: Record<LogLevel, number> = { INFO: 0, WARN: 0, ERROR: 0, DEBUG: 0 }
@@ -101,40 +94,23 @@ export function FilterSidebar() {
   }, [tab, tab?.lineCache.size])
 
   const totalCached = useMemo(() => {
-    if (!tab) return 0
     return (Object.values(levelCounts) as number[]).reduce((a, b) => a + b, 0)
-  }, [levelCounts, tab])
+  }, [levelCounts])
 
-  const toggleLevel = (level: LogLevel) => {
-    const next = new Set(filter.levels)
-    if (next.has(level)) {
-      if (next.size === 1) return
-      next.delete(level)
-    } else {
-      next.add(level)
-    }
-    setFilter({ ...filter, levels: next })
+  if (!tab || !filter) {
+    return (
+      <div className="flex h-full w-48 shrink-0 flex-col border-r border-border bg-card text-xs">
+        <div className="border-b border-border px-3 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Filters
+          </span>
+        </div>
+      </div>
+    )
   }
-
-  const applyQuickFilter = (term: string | null) => {
-    const next = term === activeQuickFilter ? null : term
-    setActiveQuickFilter(next)
-    if (next) {
-      setQuery(next)
-      void runSearch()
-      openSearch()
-    }
-  }
-
-  const quickFilters = [
-    { label: 'Errors only', term: 'ERROR' },
-    { label: 'Warnings only', term: 'WARN' },
-    { label: 'Hide Microsoft logs', term: '-Microsoft.' }
-  ]
 
   return (
     <div className="flex h-full w-48 shrink-0 flex-col border-r border-border bg-card text-xs">
-      {/* Sidebar header */}
       <div className="border-b border-border px-3 py-2">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
           Filters
@@ -142,7 +118,6 @@ export function FilterSidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-1">
-        {/* Levels section */}
         <SectionHeader
           label="Levels"
           expanded={levelsExpanded}
@@ -150,19 +125,22 @@ export function FilterSidebar() {
         />
         {levelsExpanded && (
           <div className="mb-2 space-y-0.5 pl-1">
-            {(['INFO', 'WARN', 'ERROR', 'DEBUG'] as LogLevel[]).map((level) => {
+            {ALL_LEVELS.map((level) => {
               const meta = LEVEL_META[level]
               const count = levelCounts[level]
-              const active = filter.levels.has(level)
+              const active = activeLevels.has(level)
+              const presetLocked =
+                filter.quickFilter === 'errors-only' || filter.quickFilter === 'warnings-only'
               return (
                 <button
                   key={level}
                   type="button"
-                  onClick={() => toggleLevel(level)}
+                  disabled={presetLocked}
+                  onClick={() => toggleLevel(tab.id, level)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors',
                     active ? 'text-foreground' : 'text-muted-foreground opacity-50',
-                    'hover:bg-accent'
+                    presetLocked ? 'cursor-default opacity-70' : 'hover:bg-accent'
                   )}
                 >
                   <div className={cn('h-2 w-2 shrink-0 rounded-sm', meta.dotClass)} />
@@ -181,17 +159,24 @@ export function FilterSidebar() {
                 </button>
               )
             })}
-            {totalCached > 0 && (
-              <p className="px-2 pt-1 text-[10px] text-muted-foreground/60">
-                ~{totalCached.toLocaleString()} indexed
+            {filterIndex?.isScanning ? (
+              <p className="px-2 pt-1 text-[10px] text-amber-400/80">
+                Filtering… {(filterIndex.scanProgress * 100).toFixed(0)}%
               </p>
-            )}
+            ) : filterIndex?.visibleLines ? (
+              <p className="px-2 pt-1 text-[10px] text-muted-foreground/60">
+                {filterIndex.visibleLines.length.toLocaleString()} matching lines
+              </p>
+            ) : totalCached > 0 ? (
+              <p className="px-2 pt-1 text-[10px] text-muted-foreground/60">
+                ~{totalCached.toLocaleString()} indexed in view
+              </p>
+            ) : null}
           </div>
         )}
 
         <div className="my-2 border-t border-border" />
 
-        {/* Time range section */}
         <SectionHeader
           label="Time range"
           expanded={timeExpanded}
@@ -201,7 +186,9 @@ export function FilterSidebar() {
           <div className="mb-2 pl-1">
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              disabled
+              className="flex w-full cursor-default items-center gap-2 rounded px-2 py-1 text-muted-foreground/60"
+              title="Time range filtering coming soon"
             >
               <Calendar className="h-3.5 w-3.5 shrink-0" />
               <span className="flex-1 text-left">All time</span>
@@ -211,7 +198,6 @@ export function FilterSidebar() {
 
         <div className="my-2 border-t border-border" />
 
-        {/* Quick filters */}
         <SectionHeader
           label="Quick filters"
           expanded={quickExpanded}
@@ -219,13 +205,13 @@ export function FilterSidebar() {
         />
         {quickExpanded && (
           <div className="mb-2 space-y-0.5 pl-1">
-            {quickFilters.map(({ label, term }) => {
-              const isActive = activeQuickFilter === term
+            {QUICK_FILTERS.map(({ label, id }) => {
+              const isActive = filter.quickFilter === id
               return (
                 <button
-                  key={term}
+                  key={id}
                   type="button"
-                  onClick={() => applyQuickFilter(term)}
+                  onClick={() => setQuickFilter(tab.id, id)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors',
                     isActive
@@ -260,7 +246,6 @@ export function FilterSidebar() {
         )}
       </div>
 
-      {/* Bottom: search shortcut hint */}
       <div className="border-t border-border px-3 py-1.5">
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
           <Search className="h-3 w-3" />

@@ -6,7 +6,10 @@ import { LogLine } from '@/components/LogLine'
 import { Minimap } from '@/components/Minimap'
 import { SearchResultsPanel } from '@/components/SearchResultsPanel'
 import { useHighlightLines } from '@/hooks/useHighlightLines'
+import { useLineFilterIndex } from '@/hooks/useLineFilterIndex'
 import { mergeHighlightSegments, useSearchHighlightSegments } from '@/hooks/useSearchHighlights'
+import { physicalToVirtualIndex } from '@/lib/logFilter'
+import { useFilterStore } from '@/stores/filterStore'
 import { useSearchStore } from '@/stores/searchStore'
 import { useTabStore } from '@/stores/tabStore'
 import {
@@ -29,6 +32,9 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const setFollowPinned = useTabStore((s) => s.setFollowPinned)
   const consumeScrollTarget = useTabStore((s) => s.consumeScrollTarget)
   const settings = useTabStore((s) => s.settings)
+  const filterIndex = useFilterStore((s) => s.getIndex(tabId))
+
+  useLineFilterIndex(tabId)
 
   const searchMatches = useSearchStore((s) => s.matches)
   const getCurrentMatch = useSearchStore((s) => s.getCurrentMatch)
@@ -53,9 +59,15 @@ export function LogViewport({ tabId }: LogViewportProps) {
   const wordWrap = settings?.wordWrap ?? false
   const tabWidth = settings?.tabWidth ?? 4
   const lineCount = tab?.lineCount ?? 0
+  const visibleLines = filterIndex.visibleLines
+  const displayLineCount = visibleLines?.length ?? lineCount
+  const resolveLineNumber = useCallback(
+    (virtualIndex: number) => visibleLines?.[virtualIndex] ?? virtualIndex,
+    [visibleLines]
+  )
   const prevLineCountRef = useRef(0)
-  const compressed = isCompressedScroll(lineCount)
-  const effectiveRowHeight = getEffectiveRowHeight(lineCount, baseRowHeight)
+  const compressed = isCompressedScroll(displayLineCount)
+  const effectiveRowHeight = getEffectiveRowHeight(displayLineCount, baseRowHeight)
   const charWidth = fontSize * CHAR_WIDTH_RATIO
 
   followPinnedRef.current = tab?.followPinned ?? true
@@ -66,21 +78,22 @@ export function LogViewport({ tabId }: LogViewportProps) {
   }, [tabId])
 
   const virtualizer = useVirtualizer({
-    count: Math.max(lineCount, 1),
+    count: Math.max(displayLineCount, 1),
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
-      if (wordWrap) return heightCacheRef.current.get(index) ?? baseRowHeight * 2
+      const lineNumber = resolveLineNumber(index)
+      if (wordWrap) return heightCacheRef.current.get(lineNumber) ?? baseRowHeight * 2
       return effectiveRowHeight
     },
     overscan: OVERSCAN,
-    getItemKey: (index) => index,
+    getItemKey: (index) => resolveLineNumber(index),
     measureElement: undefined
   })
 
   const virtualItems = virtualizer.getVirtualItems()
   const totalSize = wordWrap
     ? virtualizer.getTotalSize()
-    : getVirtualTotalSize(lineCount, baseRowHeight)
+    : getVirtualTotalSize(displayLineCount, baseRowHeight)
 
   const fetchLines = useCallback(
     async (startLine: number, count: number): Promise<void> => {
@@ -106,9 +119,9 @@ export function LogViewport({ tabId }: LogViewportProps) {
   )
 
   const scrollToEnd = useCallback(() => {
-    if (lineCount === 0) return
+    if (displayLineCount === 0) return
 
-    const lastLine = lineCount - 1
+    const lastLine = displayLineCount - 1
     const doScroll = () => {
       if (wordWrap) virtualizer.measure()
       if (wordWrap || compressed) {
@@ -123,14 +136,17 @@ export function LogViewport({ tabId }: LogViewportProps) {
       const tailStart = Math.max(0, lastLine - OVERSCAN)
       let missingTail = false
       for (let i = tailStart; i <= lastLine; i++) {
-        if (!tab.lineCache.has(i)) {
+        const lineNumber = resolveLineNumber(i)
+        if (!tab.lineCache.has(lineNumber)) {
           missingTail = true
           break
         }
       }
 
       if (missingTail) {
-        void fetchLines(tailStart, lastLine - tailStart + 1).then(() => {
+        const physicalStart = resolveLineNumber(tailStart)
+        const physicalEnd = resolveLineNumber(lastLine)
+        void fetchLines(physicalStart, physicalEnd - physicalStart + 1).then(() => {
           requestAnimationFrame(() => requestAnimationFrame(doScroll))
         })
         return
@@ -138,24 +154,25 @@ export function LogViewport({ tabId }: LogViewportProps) {
     }
 
     requestAnimationFrame(() => requestAnimationFrame(doScroll))
-  }, [lineCount, wordWrap, compressed, virtualizer, tab, fetchLines])
+  }, [displayLineCount, wordWrap, compressed, virtualizer, tab, fetchLines, resolveLineNumber])
 
-  const visibleLines = useMemo(
+  const visibleLinesForHighlight = useMemo(
     () =>
       virtualItems
         .map((vi) => {
-          const text = tab?.lineCache.get(vi.index)
-          return text !== undefined ? { lineNumber: vi.index, text } : null
+          const lineNumber = resolveLineNumber(vi.index)
+          const text = tab?.lineCache.get(lineNumber)
+          return text !== undefined ? { lineNumber, text } : null
         })
         .filter((l): l is { lineNumber: number; text: string } => l !== null),
-    [virtualItems, tab?.lineCache]
+    [virtualItems, tab?.lineCache, resolveLineNumber]
   )
 
-  const highlightSegments = useHighlightLines(visibleLines, settings?.highlightRules ?? [], tab?.path)
+  const highlightSegments = useHighlightLines(visibleLinesForHighlight, settings?.highlightRules ?? [], tab?.path)
 
   const currentMatch = getCurrentMatch()
   const searchHighlightSegments = useSearchHighlightSegments(
-    virtualItems.map((vi) => vi.index),
+    virtualItems.map((vi) => resolveLineNumber(vi.index)),
     searchMatches,
     currentMatch
   )
@@ -172,10 +189,13 @@ export function LogViewport({ tabId }: LogViewportProps) {
   useEffect(() => {
     const target = consumeScrollTarget(tabId)
     if (target !== null) {
+      const virtualLine =
+        visibleLines !== null ? physicalToVirtualIndex(target.line, visibleLines) : target.line
+
       if (target.align === 'end') {
         scrollToEnd()
       } else {
-        virtualizer.scrollToIndex(target.line, { align: target.align })
+        virtualizer.scrollToIndex(virtualLine, { align: target.align })
       }
 
       setHighlightColumn(target.column)
@@ -194,13 +214,14 @@ export function LogViewport({ tabId }: LogViewportProps) {
     virtualizer,
     charWidth,
     wordWrap,
-    scrollToEnd
+    scrollToEnd,
+    visibleLines
   ])
 
   useEffect(() => {
     if (!tab || virtualItems.length === 0) return
-    const first = virtualItems[0].index
-    const last = virtualItems[virtualItems.length - 1].index
+    const first = resolveLineNumber(virtualItems[0].index)
+    const last = resolveLineNumber(virtualItems[virtualItems.length - 1].index)
     const missing: number[] = []
 
     for (let i = first; i <= last; i++) {
@@ -212,10 +233,10 @@ export function LogViewport({ tabId }: LogViewportProps) {
       const count = missing[missing.length - 1] - start + 1
       void fetchLines(start, count)
     }
-  }, [tab, virtualItems, fetchLines, fetchTick])
+  }, [tab, virtualItems, fetchLines, fetchTick, resolveLineNumber])
 
   useEffect(() => {
-    if (!tab?.followPinned || lineCount === 0) {
+    if (!tab?.followPinned || displayLineCount === 0 || filterIndex.isScanning) {
       prevLineCountRef.current = lineCount
       return
     }
@@ -233,7 +254,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
       if (!followPinnedRef.current) return
       scrollToEnd()
     })
-  }, [tab?.followPinned, lineCount, scrollToEnd])
+  }, [tab?.followPinned, lineCount, displayLineCount, filterIndex.isScanning, scrollToEnd])
 
   useEffect(
     () => () => {
@@ -292,25 +313,27 @@ export function LogViewport({ tabId }: LogViewportProps) {
       const prev = heightCacheRef.current.get(lineNumber)
       if (prev === rounded) return
       heightCacheRef.current.set(lineNumber, rounded)
-      virtualizer.resizeItem(lineNumber, rounded)
+      virtualizer.resizeItem(
+        visibleLines ? physicalToVirtualIndex(lineNumber, visibleLines) : lineNumber,
+        rounded
+      )
 
-      if (
-        followPinnedRef.current &&
-        wordWrap &&
-        lineCount > 0 &&
-        lineNumber >= lineCount - OVERSCAN
-      ) {
+      const nearTail = visibleLines
+        ? visibleLines.indexOf(lineNumber) >= Math.max(0, displayLineCount - OVERSCAN)
+        : lineNumber >= lineCount - OVERSCAN
+
+      if (followPinnedRef.current && wordWrap && displayLineCount > 0 && nearTail) {
         if (followScrollRafRef.current !== null) {
           cancelAnimationFrame(followScrollRafRef.current)
         }
         followScrollRafRef.current = requestAnimationFrame(() => {
           followScrollRafRef.current = null
           if (!followPinnedRef.current) return
-          virtualizer.scrollToIndex(lineCount - 1, { align: 'end' })
+          virtualizer.scrollToIndex(displayLineCount - 1, { align: 'end' })
         })
       }
     },
-    [virtualizer, wordWrap, lineCount]
+    [virtualizer, wordWrap, displayLineCount, visibleLines, lineCount]
   )
 
   const handleScrollbarScroll = useCallback(
@@ -343,13 +366,21 @@ export function LogViewport({ tabId }: LogViewportProps) {
     if (wordWrap || !tab) return '100%'
     let maxLen = 0
     for (const vi of virtualItems) {
-      const text = tab.lineCache.get(vi.index) ?? ''
+      const text = tab.lineCache.get(resolveLineNumber(vi.index)) ?? ''
       maxLen = Math.max(maxLen, text.length)
     }
     return `${GUTTER_WIDTH + maxLen * charWidth + 32}px`
-  }, [virtualItems, tab, charWidth, wordWrap])
+  }, [virtualItems, tab, charWidth, wordWrap, resolveLineNumber])
 
   if (!tab) return null
+
+  if (visibleLines && !filterIndex.isScanning && visibleLines.length === 0) {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-1 items-center justify-center bg-background text-sm text-muted-foreground">
+        No lines match the current filters.
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1">
@@ -365,18 +396,20 @@ export function LogViewport({ tabId }: LogViewportProps) {
             style={{ height: totalSize, minWidth: contentMinWidth, width: '100%', position: 'relative' }}
           >
             {virtualItems.map((vi) => {
-              const text = tab.lineCache.get(vi.index) ?? ''
-              const ruleSegments = highlightSegments.get(vi.index) ?? []
-              const searchSegments = searchHighlightSegments.get(vi.index) ?? []
+              const lineNumber = resolveLineNumber(vi.index)
+              const text = tab.lineCache.get(lineNumber) ?? ''
+              const ruleSegments = highlightSegments.get(lineNumber) ?? []
+              const searchSegments = searchHighlightSegments.get(lineNumber) ?? []
               const segments = mergeHighlightSegments(ruleSegments, searchSegments)
-              const isCurrentMatchLine = currentMatch?.lineNumber === vi.index
+              const isCurrentMatchLine = currentMatch?.lineNumber === lineNumber
               const colHighlight =
-                highlightLine === vi.index ? highlightColumn : null
+                highlightLine === lineNumber ? highlightColumn : null
 
               return (
                 <div
                   key={vi.key}
                   data-index={vi.index}
+                  data-line-number={lineNumber}
                   style={{
                     position: 'absolute',
                     top: 0,
@@ -387,7 +420,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
                   }}
                 >
                   <LogLine
-                    lineNumber={vi.index}
+                    lineNumber={lineNumber}
                     text={text}
                     rowHeight={baseRowHeight}
                     fontSize={fontSize}
@@ -422,7 +455,7 @@ export function LogViewport({ tabId }: LogViewportProps) {
         <CompressedScrollbar
           scrollTop={scrollTop}
           clientHeight={clientHeight}
-          lineCount={lineCount}
+          lineCount={displayLineCount}
           rowHeight={baseRowHeight}
           onScrollTo={handleScrollbarScroll}
         />

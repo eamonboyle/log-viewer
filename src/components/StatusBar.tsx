@@ -1,4 +1,6 @@
 import { useTabStore } from '@/stores/tabStore'
+import { useFilterStore } from '@/stores/filterStore'
+import { isFilterActive } from '@/lib/logFilter'
 import { formatBytes, formatLineCount } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -8,6 +10,8 @@ function Dot() {
 
 export function StatusBar() {
   const tab = useTabStore((s) => s.getActiveTab())
+  const filter = useFilterStore((s) => (tab ? s.getFilter(tab.id) : null))
+  const filterIndex = useFilterStore((s) => (tab ? s.getIndex(tab.id) : null))
 
   if (!tab) {
     return (
@@ -25,7 +29,13 @@ export function StatusBar() {
       </span>
 
       <Dot />
-      <span className="tabular-nums">{formatLineCount(tab.lineCount)} lines</span>
+      {filter && filterIndex?.visibleLines && isFilterActive(filter) ? (
+        <span className="tabular-nums">
+          {formatLineCount(filterIndex.visibleLines.length)} of {formatLineCount(tab.lineCount)} lines
+        </span>
+      ) : (
+        <span className="tabular-nums">{formatLineCount(tab.lineCount)} lines</span>
+      )}
       <Dot />
       <span className="tabular-nums">{formatBytes(tab.fileSize)}</span>
 

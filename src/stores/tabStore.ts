@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { IPC_INVOKE } from '@shared/ipc'
+import { useFilterStore } from '@/stores/filterStore'
 import type { AppSettings, ColumnLayout, HighlightRule, HighlightedLine, LogLine } from '@shared/types'
 
 export interface TabSession {
@@ -167,6 +168,8 @@ export const useTabStore = create<TabStore>((set, get) => ({
     if (tab) {
       await window.logViewer.invoke(IPC_INVOKE.FILE_CLOSE, tab.sessionId)
     }
+
+    useFilterStore.getState().clearTab(tabId)
 
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== tabId)
