@@ -18,7 +18,7 @@ import {
 
 const BATCH_MS = 16
 const AWAIT_WRITE_FINISH_MS = 50
-const INDEX_CHUNK = 256 * 1024
+export const INDEX_CHUNK = 256 * 1024
 
 export interface TailEngineOptions {
   encodingOverride?: EncodingOverride
@@ -41,6 +41,15 @@ export function resolveUsePolling(filePath: string, setting: boolean | 'auto'): 
   if (setting === true) return true
   if (setting === false) return false
   return isUncPath(filePath) || process.platform === 'win32'
+}
+
+/** Index just past the last line terminator; a final CR is held back because its LF may start the next chunk */
+function lastLineEnd(buffer: Buffer): number {
+  for (let i = buffer.length - 1; i >= 0; i--) {
+    if (buffer[i] === 0x0a) return i + 1
+    if (buffer[i] === 0x0d && i < buffer.length - 1) return i + 1
+  }
+  return 0
 }
 
 export class TailEngine extends EventEmitter {
@@ -88,8 +97,7 @@ export class TailEngine extends EventEmitter {
     }
 
     await this.startWatch()
-    void this.runBackgroundIndex()
-    await this.readNewBytes()
+    await this.runBackgroundIndex()
   }
 
   async stop(): Promise<void> {
@@ -120,41 +128,50 @@ export class TailEngine extends EventEmitter {
     this.workerState = createInitialChunkState(this.encodingOverrideValue())
 
     try {
-      let indexReadOffset = 0
-      while (indexReadOffset < fileSize && !this.destroyed) {
+      while (this.tailByteOffset < fileSize && !this.destroyed) {
         const chunk = await this.reader.readRange(
-          indexReadOffset,
-          Math.min(indexReadOffset + INDEX_CHUNK, fileSize)
+          this.tailByteOffset,
+          Math.min(this.tailByteOffset + INDEX_CHUNK, fileSize)
         )
         if (chunk.length === 0) break
 
-        const result = await processIndexChunkInWorker(
-          chunk,
-          indexReadOffset,
-          this.workerState,
-          this.encodingOverrideValue()
-        )
+        const combined = Buffer.concat([this.partialBuffer, chunk])
+        const baseOffset = this.tailByteOffset - this.partialBuffer.length
+        const end = lastLineEnd(combined)
 
-        this.workerState = result.state
-        this.index.applyBoundariesBatch(result.boundaries)
-        this.index.syncFromWorkerState({
-          ...result.state,
-          indexedThrough: result.indexedThrough
-        })
-        indexReadOffset = result.indexedThrough
-        this.tailByteOffset = indexReadOffset
+        if (end > 0) {
+          const result = await processIndexChunkInWorker(
+            combined.subarray(0, end),
+            baseOffset,
+            this.workerState,
+            this.encodingOverrideValue()
+          )
+
+          this.workerState = result.state
+          this.index.applyBoundariesBatch(result.boundaries)
+          this.index.syncFromWorkerState({
+            ...result.state,
+            indexedThrough: result.indexedThrough
+          })
+        }
+
+        this.partialBuffer = Buffer.from(combined.subarray(end))
+        this.tailByteOffset += chunk.length
 
         this.emitProgress(false)
         await new Promise((r) => setImmediate(r))
       }
 
-      this.index.finalize(fileSize, false)
+      this.index.finalize(fileSize, this.partialBuffer.length > 0)
       this.emitProgress(true)
     } catch (err) {
       this.emit('error', { message: (err as Error).message })
+      return
     } finally {
       this.indexing = false
     }
+
+    await this.readNewBytes()
   }
 
   private processIncomingBytes(data: Buffer, emitLines: boolean): void {
@@ -163,7 +180,7 @@ export class TailEngine extends EventEmitter {
     const { complete, partial } = splitLines(combined)
 
     this.partialBuffer = Buffer.from(partial)
-    this.tailByteOffset = baseOffset + combined.length - partial.length
+    this.tailByteOffset = baseOffset + combined.length
 
     const fromLine = this.index.getLineCount()
     const texts: string[] = []
@@ -210,7 +227,7 @@ export class TailEngine extends EventEmitter {
   }
 
   private async readNewBytes(): Promise<void> {
-    if (this.destroyed) return
+    if (this.destroyed || this.indexing) return
 
     try {
       const fileSize = await this.reader.getFileSize()
@@ -272,7 +289,6 @@ export class TailEngine extends EventEmitter {
     await this.startWatch()
     void this.runBackgroundIndex()
     this.emit('rotated', { preservedScroll: false })
-    await this.readNewBytes()
   }
 
   private queueAppend(fromLine: number, texts: string[]): void {

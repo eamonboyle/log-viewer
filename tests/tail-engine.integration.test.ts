@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { TailEngine, isUncPath, resolveUsePolling } from '../electron/services/tail-engine'
+import { TailEngine, INDEX_CHUNK, isUncPath, resolveUsePolling } from '../electron/services/tail-engine'
 import { FileSession } from '../electron/services/file-session'
 
 async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
@@ -104,6 +104,69 @@ describe('TailEngine integration', () => {
 
       const all = await session.readLines(0, existing.length + markers.length)
       expect(all.lines.map((l) => l.text)).toEqual([...existing, ...markers])
+    } finally {
+      await session.close()
+    }
+  })
+
+  it('indexes a BOM-prefixed CRLF file whose lines straddle chunk edges', async () => {
+    const expected: string[] = []
+    let pos = 3
+    const push = (text: string) => {
+      expected.push(text)
+      pos += text.length + 2
+    }
+    const fillTo = (target: number) => {
+      while (pos + 64 <= target) push(`line-${expected.length}`)
+    }
+    fillTo(INDEX_CHUNK - 1)
+    push('cr-at-chunk-edge'.padEnd(INDEX_CHUNK - 1 - pos, 'x'))
+    fillTo(2 * INDEX_CHUNK - 8)
+    push('text-across-chunk-edge'.padEnd(2 * INDEX_CHUNK + 8 - pos, 'x'))
+    for (let i = 0; i < 100; i++) push(`line-${expected.length}`)
+
+    const content = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(expected.map((line) => `${line}\r\n`).join(''))
+    ])
+    expect(content[INDEX_CHUNK - 1]).toBe(0x0d)
+    expect(content[INDEX_CHUNK]).toBe(0x0a)
+    await fs.writeFile(filePath, content)
+
+    const session = new FileSession(filePath)
+    try {
+      await session.start()
+      await waitFor(() => session.getIndexStatus().complete)
+      expect(session.getIndexStatus().lineCount).toBe(expected.length)
+
+      const all = await session.readLines(0, expected.length)
+      expect(all.lines.map((l) => l.text)).toEqual(expected)
+    } finally {
+      await session.close()
+    }
+  })
+
+  it('completes a line left unterminated at open from later appends', async () => {
+    const existing = ['first line', 'second line']
+    const head = `${existing.join('\n')}\n`
+    await fs.writeFile(filePath, `${head}part-1`)
+
+    const session = new FileSession(filePath)
+    try {
+      await session.start()
+      expect(session.getIndexStatus().lineCount).toBe(existing.length)
+
+      await fs.appendFile(filePath, '-part-2')
+      await waitFor(() => session.getIndexStatus().fileSize === head.length + 'part-1-part-2'.length)
+
+      await fs.appendFile(filePath, '-part-3\n')
+      await waitFor(() => session.getIndexStatus().lineCount === existing.length + 1)
+
+      await fs.appendFile(filePath, 'next line\n')
+      await waitFor(() => session.getIndexStatus().lineCount === existing.length + 2)
+
+      const all = await session.readLines(0, existing.length + 2)
+      expect(all.lines.map((l) => l.text)).toEqual([...existing, 'part-1-part-2-part-3', 'next line'])
     } finally {
       await session.close()
     }
