@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
@@ -167,6 +167,47 @@ describe('TailEngine integration', () => {
 
       const all = await session.readLines(0, existing.length + 2)
       expect(all.lines.map((l) => l.text)).toEqual([...existing, 'part-1-part-2-part-3', 'next line'])
+    } finally {
+      await session.close()
+    }
+  })
+
+  it('reads each line appended during a slow tail read exactly once', async () => {
+    const existing = ['first line', 'second line']
+    await fs.writeFile(filePath, existing.map((line) => `${line}\n`).join(''))
+    const markers = [1, 2, 3, 4, 5].map((i) => `ERROR MARKER ${i} ${'x'.repeat(i)}`)
+
+    const session = new FileSession(filePath)
+    try {
+      await session.start()
+      const appended: string[] = []
+      session.tailEngine.on('appended', (payload) => {
+        appended.push(...payload.lines.lines.map((l) => l.text))
+      })
+
+      const reader = session.tailEngine.reader
+      const readRange = reader.readRange.bind(reader)
+      let rangeReads = 0
+      let inFlight = 0
+      vi.spyOn(reader, 'readRange').mockImplementation(async (from, to) => {
+        rangeReads++
+        inFlight++
+        const data = await readRange(from, to)
+        await new Promise((r) => setTimeout(r, 400))
+        inFlight--
+        return data
+      })
+
+      for (const marker of markers) {
+        const readsBefore = rangeReads
+        await fs.appendFile(filePath, `${marker}\n`)
+        await waitFor(() => rangeReads > readsBefore)
+      }
+      await waitFor(() => inFlight === 0 && appended.length >= markers.length)
+
+      const all = await session.readLines(0, session.getIndexStatus().lineCount)
+      expect(all.lines.map((l) => l.text)).toEqual([...existing, ...markers])
+      expect(appended).toEqual(markers)
     } finally {
       await session.close()
     }
