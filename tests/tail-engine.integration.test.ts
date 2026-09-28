@@ -3,6 +3,15 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { TailEngine, isUncPath, resolveUsePolling } from '../electron/services/tail-engine'
+import { FileSession } from '../electron/services/file-session'
+
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('waitFor timed out')
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
 
 describe('tail-engine helpers', () => {
   it('detects UNC paths', () => {
@@ -70,6 +79,34 @@ describe('TailEngine integration', () => {
     expect(events.some((e) => e.includes('refresh'))).toBe(false)
     expect(events.some((e) => e.includes('modified'))).toBe(false)
     expect(events).toContain('appended')
+  })
+
+  it('reads back the text of lines appended in separate writes to a non-empty file', async () => {
+    const existing = Array.from({ length: 20_000 }, (_, n) => `INFO Benchmark line ${n}`)
+    await fs.writeFile(filePath, existing.map((line) => `${line}\n`).join(''))
+    const markers = [1, 2, 3, 4, 5].map((i) => `ERROR MARKER ${i}`)
+
+    const session = new FileSession(filePath)
+    try {
+      await session.start()
+      await waitFor(() => {
+        const status = session.getIndexStatus()
+        return status.complete && status.lineCount === existing.length
+      })
+
+      for (const [i, marker] of markers.entries()) {
+        await fs.appendFile(filePath, `${marker}\n`)
+        await waitFor(() => session.getIndexStatus().lineCount === existing.length + i + 1)
+      }
+
+      const tail = await session.readLines(existing.length, markers.length)
+      expect(tail.lines.map((l) => l.text)).toEqual(markers)
+
+      const all = await session.readLines(0, existing.length + markers.length)
+      expect(all.lines.map((l) => l.text)).toEqual([...existing, ...markers])
+    } finally {
+      await session.close()
+    }
   })
 
   it('handles truncate silently', async () => {
