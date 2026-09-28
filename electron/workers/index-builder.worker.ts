@@ -1,9 +1,10 @@
 import { parentPort } from 'worker_threads'
 import type { Encoding } from '@shared/types'
 import {
-  createInitialChunkState,
+  packBoundaries,
   processIndexChunk,
-  type IndexChunkState
+  type IndexChunkState,
+  type PackedBoundaries
 } from '../services/index-chunk-processor'
 
 interface ProcessChunkMessage {
@@ -19,7 +20,7 @@ interface ProcessChunkResult {
   type: 'chunkResult'
   id: number
   state: IndexChunkState
-  boundaries: { lineNumber: number; byteOffset: number; byteLength: number }[]
+  boundaries: PackedBoundaries
   indexedThrough: number
 }
 
@@ -29,14 +30,15 @@ if (parentPort) {
 
     const result = processIndexChunk(msg.buffer, msg.startOffset, msg.state, msg.encodingOverride)
 
+    const boundaries = packBoundaries(result.boundaries)
     const response: ProcessChunkResult = {
       type: 'chunkResult',
       id: msg.id,
       state: result.state,
-      boundaries: result.boundaries,
+      boundaries,
       indexedThrough: result.indexedThrough
     }
 
-    parentPort!.postMessage(response)
+    parentPort!.postMessage(response, [boundaries.buffer])
   })
 }

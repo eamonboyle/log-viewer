@@ -38,6 +38,25 @@ export function detectEncodingFromBuffer(buffer: Buffer): { encoding: Encoding; 
   return { encoding: 'utf8', bomSkipped: false, skip: 0 }
 }
 
+export type PackedBoundaries = Float64Array<ArrayBuffer>
+
+export function packBoundaries(boundaries: LineBoundary[]): PackedBoundaries {
+  const packed = new Float64Array(boundaries.length * 2)
+  for (let i = 0; i < boundaries.length; i++) {
+    packed[2 * i] = boundaries[i].byteOffset
+    packed[2 * i + 1] = boundaries[i].byteLength
+  }
+  return packed
+}
+
+export function unpackBoundaries(packed: PackedBoundaries, firstLine: number): LineBoundary[] {
+  const boundaries: LineBoundary[] = new Array(packed.length / 2)
+  for (let i = 0; i < boundaries.length; i++) {
+    boundaries[i] = { lineNumber: firstLine + i, byteOffset: packed[2 * i], byteLength: packed[2 * i + 1] }
+  }
+  return boundaries
+}
+
 /** Process a file chunk off the main thread */
 export function processIndexChunk(
   buffer: Buffer,

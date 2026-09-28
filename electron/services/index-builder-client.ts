@@ -6,7 +6,9 @@ import type { LineBoundary } from './sparse-index'
 import {
   createInitialChunkState,
   processIndexChunk,
-  type IndexChunkState
+  unpackBoundaries,
+  type IndexChunkState,
+  type PackedBoundaries
 } from './index-chunk-processor'
 
 interface ChunkResult {
@@ -15,9 +17,16 @@ interface ChunkResult {
   indexedThrough: number
 }
 
+interface WorkerChunkResult {
+  state: IndexChunkState
+  boundaries: PackedBoundaries
+  indexedThrough: number
+}
+
 let worker: Worker | null = null
+let workerAvailable: boolean | undefined
 let nextId = 0
-const pending = new Map<number, { resolve: (r: ChunkResult) => void; reject: (e: Error) => void }>()
+const pending = new Map<number, { resolve: (r: WorkerChunkResult) => void; reject: (e: Error) => void }>()
 
 function useInlineProcessing(): boolean {
   return process.env.VITEST === 'true' || typeof process.versions.electron === 'undefined'
@@ -30,7 +39,8 @@ function getWorkerPath(): string {
 
 function canUseWorkerThread(): boolean {
   if (useInlineProcessing()) return false
-  return existsSync(getWorkerPath())
+  workerAvailable ??= existsSync(getWorkerPath())
+  return workerAvailable
 }
 
 function getWorker(): Worker {
@@ -38,13 +48,7 @@ function getWorker(): Worker {
 
   worker = new Worker(getWorkerPath())
 
-  worker.on('message', (msg: {
-    type: string
-    id: number
-    state: IndexChunkState
-    boundaries: LineBoundary[]
-    indexedThrough: number
-  }) => {
+  worker.on('message', (msg: WorkerChunkResult & { type: string; id: number }) => {
     if (msg.type !== 'chunkResult') return
     const entry = pending.get(msg.id)
     if (!entry) return
@@ -73,14 +77,29 @@ export async function processIndexChunkInWorker(
   state: IndexChunkState,
   encodingOverride?: Encoding
 ): Promise<ChunkResult> {
-  if (!canUseWorkerThread()) {
-    return processIndexChunk(buffer, startOffset, { ...state, anchors: [...state.anchors] }, encodingOverride)
-  }
+  const lastAnchor = state.anchors[state.anchors.length - 1]
+  const sent = { ...state, anchors: [lastAnchor] }
+  const result = canUseWorkerThread()
+    ? await processInWorker(buffer, startOffset, sent, encodingOverride)
+    : processIndexChunk(buffer, startOffset, sent, encodingOverride)
 
+  const [, ...newAnchors] = result.state.anchors
+  return {
+    ...result,
+    state: { ...result.state, anchors: [...state.anchors, ...newAnchors] }
+  }
+}
+
+async function processInWorker(
+  buffer: Buffer,
+  startOffset: number,
+  state: IndexChunkState,
+  encodingOverride?: Encoding
+): Promise<ChunkResult> {
   const id = nextId++
   const w = getWorker()
 
-  return new Promise((resolve, reject) => {
+  const result = await new Promise<WorkerChunkResult>((resolve, reject) => {
     pending.set(id, { resolve, reject })
     w.postMessage({
       type: 'processChunk',
@@ -91,6 +110,8 @@ export async function processIndexChunkInWorker(
       encodingOverride
     })
   })
+
+  return { ...result, boundaries: unpackBoundaries(result.boundaries, state.lineCount) }
 }
 
 /** The worker is shared by all sessions, so it stays up while any of them awaits a chunk */
