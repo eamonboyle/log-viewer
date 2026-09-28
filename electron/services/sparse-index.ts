@@ -101,11 +101,10 @@ export class SparseLineIndex {
       if (this.bomSkipped) {
         if (this.encoding === 'utf8') i = 3
         else if (this.encoding === 'utf16le') i = 2
-        offset += i
       }
     }
 
-    let lineStart = offset
+    let lineStart = offset + i
     let sawCr = false
     let sawLf = false
     let sawCrLf = false

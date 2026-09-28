@@ -54,13 +54,12 @@ export function processIndexChunk(
     state.encoding = detected.encoding
     state.bomSkipped = detected.bomSkipped
     i = detected.skip
-    offset += i
   } else if (encodingOverride && startOffset === 0 && !state.bomSkipped) {
     state.encoding = encodingOverride
     state.bomSkipped = true
   }
 
-  let lineStart = offset
+  let lineStart = offset + i
   let sawCr = false
   let sawLf = false
   let sawCrLf = false
