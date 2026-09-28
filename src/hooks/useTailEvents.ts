@@ -1,100 +1,67 @@
-import { useEffect, useRef } from 'react'
-import { IPC_EVENT } from '@shared/ipc'
-import type { TailAppendedPayload, IndexProgressPayload, FileErrorPayload } from '@shared/types'
+import { useEffect } from 'react'
+import { IPC_EVENT, type LogViewerApi } from '@shared/ipc'
 import { useGoToLineStore } from '@/stores/goToLineStore'
 import { useSearchStore } from '@/stores/searchStore'
-import { useTabStore } from '@/stores/tabStore'
+import { useTabStore, type TailBatch } from '@/stores/tabStore'
 
-type PendingTail = {
-  lines: TailAppendedPayload['lines']['lines']
-  progress?: IndexProgressPayload
-}
+/** Subscribe to tail IPC events and coalesce them into one store update per session per animation frame */
+export function attachTailEvents(bus: Pick<LogViewerApi, 'on'>): () => void {
+  let pending = new Map<string, TailBatch>()
+  let rafId: number | null = null
 
-/** Coalesce tail IPC events into one store update per animation frame */
-function useBatchedTailUpdates(): {
-  queueAppend: (sessionId: string, payload: TailAppendedPayload) => void
-  queueProgress: (sessionId: string, payload: IndexProgressPayload) => void
-} {
-  const pendingRef = useRef<Map<string, PendingTail>>(new Map())
-  const rafRef = useRef<number | null>(null)
-
-  const flush = useRef(() => {
-    rafRef.current = null
-    const pending = pendingRef.current
-    pendingRef.current = new Map()
+  const flush = () => {
+    rafId = null
+    const batches = pending
+    pending = new Map()
     const applyTailBatch = useTabStore.getState().applyTailBatch
-
-    for (const [sessionId, batch] of pending) {
-      applyTailBatch(
-        sessionId,
-        batch.lines,
-        batch.progress
-          ? {
-              lineCount: batch.progress.lineCount,
-              percent: batch.progress.percent,
-              complete: batch.progress.complete
-            }
-          : undefined
-      )
+    for (const [sessionId, batch] of batches) {
+      applyTailBatch(sessionId, batch)
     }
-  })
+  }
 
-  const scheduleFlush = useRef(() => {
-    if (rafRef.current !== null) return
-    rafRef.current = requestAnimationFrame(flush.current)
-  })
+  const scheduleFlush = () => {
+    if (rafId !== null) return
+    rafId = requestAnimationFrame(flush)
+  }
 
-  useEffect(
-    () => () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-    },
-    []
-  )
+  const pendingFor = (sessionId: string): TailBatch => {
+    const existing = pending.get(sessionId)
+    if (existing) return existing
+    const created: TailBatch = { reset: false, lines: [] }
+    pending.set(sessionId, created)
+    return created
+  }
 
-  return {
-    queueAppend: (sessionId, payload) => {
-      const map = pendingRef.current
-      const existing = map.get(sessionId) ?? { lines: [] }
-      existing.lines = existing.lines.concat(payload.lines.lines)
-      map.set(sessionId, existing)
-      scheduleFlush.current()
-    },
-    queueProgress: (sessionId, payload) => {
-      const map = pendingRef.current
-      const existing = map.get(sessionId) ?? { lines: [] }
-      existing.progress = payload
-      map.set(sessionId, existing)
-      scheduleFlush.current()
-    }
+  const unsubs = [
+    bus.on(IPC_EVENT.TAIL_APPENDED, (sessionId, payload) => {
+      const batch = pendingFor(sessionId)
+      batch.lines = batch.lines.concat(payload.lines.lines)
+      scheduleFlush()
+    }),
+    bus.on(IPC_EVENT.INDEX_PROGRESS, (sessionId, payload) => {
+      const batch = pendingFor(sessionId)
+      batch.progress = { lineCount: payload.lineCount, percent: payload.percent, complete: payload.complete }
+      scheduleFlush()
+    }),
+    bus.on(IPC_EVENT.FILE_ERROR, (sessionId, payload) => {
+      useTabStore.getState().setError(sessionId, payload.message)
+    }),
+    bus.on(IPC_EVENT.FILE_ROTATED, (sessionId) => {
+      const tab = useTabStore.getState().tabs.find((t) => t.sessionId === sessionId)
+      if (tab && useSearchStore.getState().total > 0) {
+        useSearchStore.getState().markStale()
+      }
+    })
+  ]
+
+  return () => {
+    unsubs.forEach((u) => u())
+    if (rafId !== null) cancelAnimationFrame(rafId)
   }
 }
 
 export function useTailEvents(): void {
-  const setError = useTabStore((s) => s.setError)
-  const { queueAppend, queueProgress } = useBatchedTailUpdates()
-
-  useEffect(() => {
-    const unsubs = [
-      window.logViewer.on(IPC_EVENT.TAIL_APPENDED, (sessionId, payload) => {
-        queueAppend(sessionId, payload as TailAppendedPayload)
-      }),
-      window.logViewer.on(IPC_EVENT.INDEX_PROGRESS, (sessionId, payload) => {
-        queueProgress(sessionId, payload as IndexProgressPayload)
-      }),
-      window.logViewer.on(IPC_EVENT.FILE_ERROR, (sessionId, payload) => {
-        const p = payload as FileErrorPayload
-        setError(sessionId, p.message)
-      }),
-      window.logViewer.on(IPC_EVENT.FILE_ROTATED, (sessionId) => {
-        const tab = useTabStore.getState().tabs.find((t) => t.sessionId === sessionId)
-        if (tab && useSearchStore.getState().total > 0) {
-          useSearchStore.getState().markStale()
-        }
-      })
-    ]
-
-    return () => unsubs.forEach((u) => u())
-  }, [queueAppend, queueProgress, setError])
+  useEffect(() => attachTailEvents(window.logViewer), [])
 }
 
 export function useMenuShortcuts(): void {
