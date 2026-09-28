@@ -62,6 +62,9 @@ export class TailEngine extends EventEmitter {
   private destroyed = false
   private followEnabled = true
   private indexing = false
+  /** The one tail read allowed at a time; changes that arrive during it coalesce into one follow-up read */
+  private tailRead: Promise<void> | null = null
+  private tailReadAgain = false
   private workerState: IndexChunkState | null = null
 
   readonly index: SparseLineIndex
@@ -226,7 +229,27 @@ export class TailEngine extends EventEmitter {
     })
   }
 
-  private async readNewBytes(): Promise<void> {
+  private readNewBytes(): Promise<void> {
+    if (this.tailRead) {
+      this.tailReadAgain = true
+      return this.tailRead
+    }
+    this.tailRead = this.drainTailReads()
+    return this.tailRead
+  }
+
+  private async drainTailReads(): Promise<void> {
+    try {
+      do {
+        this.tailReadAgain = false
+        await this.readNewBytesOnce()
+      } while (this.tailReadAgain)
+    } finally {
+      this.tailRead = null
+    }
+  }
+
+  private async readNewBytesOnce(): Promise<void> {
     if (this.destroyed || this.indexing) return
 
     try {
