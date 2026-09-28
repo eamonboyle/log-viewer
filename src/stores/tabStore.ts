@@ -248,11 +248,14 @@ export const useTabStore = create<TabStore>((set, get) => ({
   },
 
   /** Apply tail append + index progress in one store update to avoid double-render flicker */
-  applyTailBatch: (sessionId: string, { lines, progress }: TailBatch) => {
-    if (lines.length === 0 && !progress) return
+  applyTailBatch: (sessionId: string, { reset, lines, progress }: TailBatch) => {
+    if (!reset && lines.length === 0 && !progress) return
     set((s) => ({
-      tabs: s.tabs.map((t) => {
-        if (t.sessionId !== sessionId) return t
+      tabs: s.tabs.map((tab) => {
+        if (tab.sessionId !== sessionId) return tab
+        const t = reset
+          ? { ...tab, lineCount: 0, lineCache: new Map<number, string>(), indexPercent: 0, indexComplete: false, hasUnread: false }
+          : tab
         let lineCache = t.lineCache
         if (lines.length > 0) {
           lineCache = new Map(t.lineCache)

@@ -47,6 +47,9 @@ export function attachTailEvents(bus: Pick<LogViewerApi, 'on'>): () => void {
       useTabStore.getState().setError(sessionId, payload.message)
     }),
     bus.on(IPC_EVENT.FILE_ROTATED, (sessionId) => {
+      // Lines and progress queued before the rotation are numbered by the old file; drop them
+      pending.set(sessionId, { reset: true, lines: [] })
+      scheduleFlush()
       const tab = useTabStore.getState().tabs.find((t) => t.sessionId === sessionId)
       if (tab && useSearchStore.getState().total > 0) {
         useSearchStore.getState().markStale()
