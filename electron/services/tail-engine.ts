@@ -306,16 +306,15 @@ export class TailEngine extends EventEmitter {
     })
   }
 
-  private emitProgress(complete: boolean): void {
-    const { lineCount, indexedThrough, fileSize } = this.index.getStatus()
+  getProgress(): IndexProgressPayload {
+    const { lineCount, indexedThrough, fileSize, complete } = this.index.getStatus()
     const percent = fileSize > 0 ? Math.min(100, (indexedThrough / fileSize) * 100) : 100
+    return { percent, lineCount, indexedThrough, complete }
+  }
 
-    this.emit('progress', {
-      percent,
-      lineCount,
-      indexedThrough,
-      complete: complete && this.index.isComplete()
-    })
+  private emitProgress(complete: boolean): void {
+    const progress = this.getProgress()
+    this.emit('progress', { ...progress, complete: complete && progress.complete })
   }
 
   emit<K extends keyof TailEngineEvents>(event: K, ...args: Parameters<TailEngineEvents[K]>): boolean {

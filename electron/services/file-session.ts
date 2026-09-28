@@ -50,12 +50,15 @@ export class FileSession {
       this.started = true
     }
 
-    const status = this.getIndexStatus()
+    const { fileSize } = this.getIndexStatus()
+    const { lineCount, percent, complete } = this.tailEngine.getProgress()
     return {
       sessionId: this.id,
       path: this.filePath,
-      lineCount: status.lineCount,
-      fileSize: status.fileSize
+      lineCount,
+      fileSize,
+      indexPercent: percent,
+      indexComplete: complete
     }
   }
 
