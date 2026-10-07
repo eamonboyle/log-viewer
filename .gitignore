@@ -10,3 +10,6 @@ Thumbs.db
 
 *.tsbuildinfo
 
+
+# verification runs (.claude/skills/verify)
+.verify/

@@ -221,7 +221,8 @@ export function LogViewport({ tabId }: LogViewportProps) {
   useEffect(() => {
     if (!tab || virtualItems.length === 0) return
     const first = resolveLineNumber(virtualItems[0].index)
-    const last = resolveLineNumber(virtualItems[virtualItems.length - 1].index)
+    // The virtualizer renders one placeholder row for an empty file; never fetch at or past EOF
+    const last = Math.min(resolveLineNumber(virtualItems[virtualItems.length - 1].index), tab.lineCount - 1)
     const missing: number[] = []
 
     for (let i = first; i <= last; i++) {

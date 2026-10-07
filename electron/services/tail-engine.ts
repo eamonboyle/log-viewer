@@ -62,6 +62,9 @@ export class TailEngine extends EventEmitter {
   private destroyed = false
   private followEnabled = true
   private indexing = false
+  /** The one tail read allowed at a time; changes that arrive during it coalesce into one follow-up read */
+  private tailRead: Promise<void> | null = null
+  private tailReadAgain = false
   private workerState: IndexChunkState | null = null
 
   readonly index: SparseLineIndex
@@ -226,7 +229,27 @@ export class TailEngine extends EventEmitter {
     })
   }
 
-  private async readNewBytes(): Promise<void> {
+  private readNewBytes(): Promise<void> {
+    if (this.tailRead) {
+      this.tailReadAgain = true
+      return this.tailRead
+    }
+    this.tailRead = this.drainTailReads()
+    return this.tailRead
+  }
+
+  private async drainTailReads(): Promise<void> {
+    try {
+      do {
+        this.tailReadAgain = false
+        await this.readNewBytesOnce()
+      } while (this.tailReadAgain)
+    } finally {
+      this.tailRead = null
+    }
+  }
+
+  private async readNewBytesOnce(): Promise<void> {
     if (this.destroyed || this.indexing) return
 
     try {
@@ -322,16 +345,15 @@ export class TailEngine extends EventEmitter {
     })
   }
 
-  private emitProgress(complete: boolean): void {
-    const { lineCount, indexedThrough, fileSize } = this.index.getStatus()
+  getProgress(): IndexProgressPayload {
+    const { lineCount, indexedThrough, fileSize, complete } = this.index.getStatus()
     const percent = fileSize > 0 ? Math.min(100, (indexedThrough / fileSize) * 100) : 100
+    return { percent, lineCount, indexedThrough, complete }
+  }
 
-    this.emit('progress', {
-      percent,
-      lineCount,
-      indexedThrough,
-      complete: complete && this.index.isComplete()
-    })
+  private emitProgress(complete: boolean): void {
+    const progress = this.getProgress()
+    this.emit('progress', { ...progress, complete: complete && progress.complete })
   }
 
   emit<K extends keyof TailEngineEvents>(event: K, ...args: Parameters<TailEngineEvents[K]>): boolean {
