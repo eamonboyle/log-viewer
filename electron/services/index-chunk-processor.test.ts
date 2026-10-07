@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { createInitialChunkState, processIndexChunk } from './index-chunk-processor'
+import {
+  createInitialChunkState,
+  packBoundaries,
+  processIndexChunk,
+  unpackBoundaries
+} from './index-chunk-processor'
 
 describe('index-chunk-processor', () => {
   it('indexes lines from buffer', () => {
@@ -19,5 +24,13 @@ describe('index-chunk-processor', () => {
 
     expect(result.state.encoding).toBe('latin1')
     expect(result.boundaries).toHaveLength(1)
+  })
+
+  it('round-trips boundaries past 4 GiB through the packed transfer format', () => {
+    const boundaries = [
+      { lineNumber: 7, byteOffset: 5_000_000_000, byteLength: 42 },
+      { lineNumber: 8, byteOffset: 5_000_000_044, byteLength: 0 }
+    ]
+    expect(unpackBoundaries(packBoundaries(boundaries), 7)).toEqual(boundaries)
   })
 })

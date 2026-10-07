@@ -4,6 +4,7 @@ import path from 'path'
 import os from 'os'
 import { TailEngine, INDEX_CHUNK, isUncPath, resolveUsePolling } from '../electron/services/tail-engine'
 import { FileSession } from '../electron/services/file-session'
+import { SparseLineIndex } from '../electron/services/sparse-index'
 
 async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -143,6 +144,24 @@ describe('TailEngine integration', () => {
       expect(all.lines.map((l) => l.text)).toEqual(expected)
     } finally {
       await session.close()
+    }
+  })
+
+  it('places the same anchors across index chunks as a single pass over the file', async () => {
+    let text = ''
+    for (let i = 0; text.length < 3 * INDEX_CHUNK; i++) text += `line-${i} ${'x'.repeat(i % 97)}\n`
+    await fs.writeFile(filePath, text)
+
+    const singlePass = new SparseLineIndex()
+    singlePass.appendBytes(Buffer.from(text), 0)
+
+    const engine = new TailEngine(filePath)
+    try {
+      await engine.start()
+      expect(engine.index.getLineCount()).toBe(singlePass.getLineCount())
+      expect(engine.index.getAnchors()).toEqual(singlePass.getAnchors())
+    } finally {
+      await engine.stop()
     }
   })
 
