@@ -6,6 +6,7 @@ export class WindowManager {
   private readonly windows = new Map<string, BrowserWindow>()
   private readonly sessionToWindows = new Map<string, Set<string>>()
   private readonly windowSessions = new Map<string, Set<string>>()
+  private readonly initialPaths = new Map<string, string>()
   private onSessionOrphaned: ((sessionId: string) => void) | null = null
 
   setSessionOrphanHandler(handler: (sessionId: string) => void): void {
@@ -18,7 +19,7 @@ export class WindowManager {
     }
   }
 
-  createWindow(): BrowserWindow {
+  createWindow(initialPath?: string): BrowserWindow {
     const windowId = randomUUID()
     const win = new BrowserWindow({
       width: 1200,
@@ -40,6 +41,7 @@ export class WindowManager {
 
     this.windows.set(windowId, win)
     this.windowSessions.set(windowId, new Set())
+    if (initialPath) this.initialPaths.set(windowId, initialPath)
 
     if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
       void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -60,6 +62,18 @@ export class WindowManager {
   getWindowIdFromWebContents(webContents: Electron.WebContents): string | undefined {
     const win = BrowserWindow.fromWebContents(webContents)
     return win ? this.getWindowId(win) : undefined
+  }
+
+  /**
+   * A path pushed to a new window is dropped because it arrives before the renderer subscribes,
+   * so the renderer pulls it once on mount instead.
+   */
+  takeInitialPath(webContents: Electron.WebContents): string | null {
+    const windowId = this.getWindowIdFromWebContents(webContents)
+    if (!windowId) return null
+    const path = this.initialPaths.get(windowId) ?? null
+    this.initialPaths.delete(windowId)
+    return path
   }
 
   getFocusedWindow(): BrowserWindow | null {
@@ -144,6 +158,7 @@ export class WindowManager {
       }
     }
     this.windowSessions.delete(windowId)
+    this.initialPaths.delete(windowId)
     this.windows.delete(windowId)
   }
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { IPC_INVOKE } from '@shared/ipc'
 import { GoToLineDialog } from '@/components/GoToLineDialog'
 import { LogViewport } from '@/components/LogViewport'
 import { FilterSidebar } from '@/components/FilterSidebar'
@@ -29,6 +30,12 @@ export default function App() {
   useEffect(() => {
     void loadSettings()
   }, [loadSettings])
+
+  useEffect(() => {
+    void window.logViewer.invoke(IPC_INVOKE.WINDOW_TAKE_INITIAL_PATH).then((path) => {
+      if (path) void openFile(path)
+    })
+  }, [openFile])
 
   useEffect(() => subscribeSearchStaleEvents(), [])
 

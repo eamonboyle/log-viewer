@@ -45,6 +45,21 @@ describe('SparseLineIndex', () => {
     expect(decodeLine(Buffer.from('hello\n'), 'utf8')).toBe('hello')
   })
 
+  it('places boundaries after a UTF-8 BOM so their byte slices are the line texts', () => {
+    const index = new SparseLineIndex()
+    const lines = ['hello', 'world']
+    const content = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(lines.map((line) => `${line}\n`).join(''))
+    ])
+    const boundaries = index.appendBytes(content, 0)
+    expect(boundaries).toHaveLength(lines.length)
+    const sliced = boundaries.map((b) =>
+      content.subarray(b.byteOffset, b.byteOffset + b.byteLength).toString()
+    )
+    expect(sliced).toEqual(lines)
+  })
+
   it('appends incrementally', () => {
     const index = new SparseLineIndex()
     index.appendBytes(Buffer.from('first\n'), 0)

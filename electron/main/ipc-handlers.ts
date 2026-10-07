@@ -70,8 +70,7 @@ function buildRecentSubmenu(): Electron.MenuItemConstructorOptions[] {
       {
         label: 'Open in New Window',
         click: () => {
-          const win = windowManager.createWindow()
-          windowManager.sendToWindow(win, 'menu:open-path', filePath)
+          windowManager.createWindow(filePath)
         }
       }
     ]
@@ -149,6 +148,8 @@ function registerIpcHandlers(): void {
     if (!session) throw new Error('Session not found')
     return session.getIndexStatus()
   })
+
+  ipcMain.handle(IPC_INVOKE.WINDOW_TAKE_INITIAL_PATH, (event) => windowManager.takeInitialPath(event.sender))
 
   ipcMain.handle(IPC_INVOKE.DIALOG_OPEN_FILE, async (event) => {
     const parent = BrowserWindow.fromWebContents(event.sender)
