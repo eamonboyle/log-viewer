@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { IPC_INVOKE } from '@shared/ipc'
 import { useFilterStore } from '@/stores/filterStore'
-import type { AppSettings, ColumnLayout, HighlightRule, HighlightedLine, LogLine } from '@shared/types'
+import type {
+  AppSettings,
+  ColumnLayout,
+  FileOpenResult,
+  HighlightRule,
+  HighlightedLine,
+  LogLine
+} from '@shared/types'
 
 export interface TabSession {
   id: string
@@ -31,6 +38,14 @@ export interface TabSession {
   hiddenColumns: number[]
 }
 
+/** One animation frame's worth of tail events for a session */
+export interface TailBatch {
+  /** File was truncated or replaced; lines/progress are numbered by the new file */
+  reset: boolean
+  lines: LogLine[]
+  progress?: { lineCount: number; percent: number; complete: boolean }
+}
+
 interface TabStore {
   tabs: TabSession[]
   activeTabId: string | null
@@ -47,8 +62,6 @@ interface TabStore {
   setFollow: (tabId: string, enabled: boolean) => Promise<void>
   toggleFollow: (tabId: string) => Promise<void>
   setFollowPinned: (tabId: string, pinned: boolean) => void
-  appendLines: (sessionId: string, lines: LogLine[]) => void
-  updateProgress: (sessionId: string, lineCount: number, percent: number, complete: boolean) => void
   setError: (sessionId: string, message: string) => void
   cacheLines: (tabId: string, lines: LogLine[]) => void
   getLine: (tabId: string, lineNumber: number) => string | undefined
@@ -61,11 +74,7 @@ interface TabStore {
   detectColumns: (tabId: string) => Promise<void>
   toggleColumnVisibility: (tabId: string, columnIndex: number) => void
   applyTheme: (theme: AppSettings['theme']) => void
-  applyTailBatch: (
-    sessionId: string,
-    lines: LogLine[],
-    progress?: { lineCount: number; percent: number; complete: boolean }
-  ) => void
+  applyTailBatch: (sessionId: string, batch: TailBatch) => void
 }
 
 function makeDisplayName(path: string): string {
@@ -90,12 +99,8 @@ async function detectColumnsForTab(tabId: string, sessionId: string, set: StoreA
   }
 }
 
-async function createTabFromPath(
-  path: string,
-  set: StoreApi<TabStore>['setState']
-): Promise<void> {
-  const result = await window.logViewer.invoke(IPC_INVOKE.FILE_OPEN, path)
-  const tab: TabSession = {
+export function createTabSession(result: FileOpenResult): TabSession {
+  return {
     id: crypto.randomUUID(),
     sessionId: result.sessionId,
     path: result.path,
@@ -115,6 +120,14 @@ async function createTabFromPath(
     columnLayout: null,
     hiddenColumns: []
   }
+}
+
+async function createTabFromPath(
+  path: string,
+  set: StoreApi<TabStore>['setState']
+): Promise<void> {
+  const result = await window.logViewer.invoke(IPC_INVOKE.FILE_OPEN, path)
+  const tab = createTabSession(result)
 
   set((s) => ({
     tabs: [...s.tabs, tab],
@@ -234,32 +247,15 @@ export const useTabStore = create<TabStore>((set, get) => ({
     }
   },
 
-  appendLines: (sessionId: string, lines: LogLine[]) => {
-    if (lines.length === 0) return
-    set((s) => ({
-      tabs: s.tabs.map((t) => {
-        if (t.sessionId !== sessionId) return t
-        const lineCache = new Map(t.lineCache)
-        for (const line of lines) {
-          lineCache.set(line.lineNumber, line.text)
-        }
-        const newLineCount = Math.max(t.lineCount, ...lines.map((l) => l.lineNumber + 1))
-        const hasUnread = !t.followPinned && lines.length > 0
-        return { ...t, lineCache, lineCount: newLineCount, hasUnread: hasUnread || t.hasUnread }
-      })
-    }))
-  },
-
   /** Apply tail append + index progress in one store update to avoid double-render flicker */
-  applyTailBatch: (
-    sessionId: string,
-    lines: LogLine[],
-    progress?: { lineCount: number; percent: number; complete: boolean }
-  ) => {
-    if (lines.length === 0 && !progress) return
+  applyTailBatch: (sessionId: string, { reset, lines, progress }: TailBatch) => {
+    if (!reset && lines.length === 0 && !progress) return
     set((s) => ({
-      tabs: s.tabs.map((t) => {
-        if (t.sessionId !== sessionId) return t
+      tabs: s.tabs.map((tab) => {
+        if (tab.sessionId !== sessionId) return tab
+        const t = reset
+          ? { ...tab, lineCount: 0, lineCache: new Map<number, string>(), indexPercent: 0, indexComplete: false, hasUnread: false }
+          : tab
         let lineCache = t.lineCache
         if (lines.length > 0) {
           lineCache = new Map(t.lineCache)
@@ -284,16 +280,6 @@ export const useTabStore = create<TabStore>((set, get) => ({
             : {})
         }
       })
-    }))
-  },
-
-  updateProgress: (sessionId: string, lineCount: number, percent: number, complete: boolean) => {
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
-        t.sessionId === sessionId
-          ? { ...t, lineCount: Math.max(t.lineCount, lineCount), indexPercent: percent, indexComplete: complete }
-          : t
-      )
     }))
   },
 
