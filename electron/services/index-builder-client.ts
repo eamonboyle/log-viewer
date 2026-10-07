@@ -93,12 +93,11 @@ export async function processIndexChunkInWorker(
   })
 }
 
+/** The worker is shared by all sessions, so it stays up while any of them awaits a chunk */
 export function terminateIndexWorker(): void {
-  if (worker) {
-    void worker.terminate()
-    worker = null
-  }
-  pending.clear()
+  if (!worker || pending.size > 0) return
+  void worker.terminate()
+  worker = null
 }
 
 export { createInitialChunkState, type IndexChunkState }
