@@ -83,6 +83,8 @@ export interface FileOpenResult {
   path: string
   lineCount: number
   fileSize: number
+  indexPercent: number
+  indexComplete: boolean
 }
 
 export type EncodingOverride = Encoding | 'auto'

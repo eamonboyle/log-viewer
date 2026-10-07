@@ -20,6 +20,7 @@ export const IPC_INVOKE = {
   TAIL_SET_FOLLOW: 'tail:setFollow',
   VIEWPORT_READ_LINES: 'viewport:readLines',
   INDEX_GET_STATUS: 'index:getStatus',
+  WINDOW_TAKE_INITIAL_PATH: 'window:takeInitialPath',
   DIALOG_OPEN_FILE: 'dialog:openFile',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
@@ -67,6 +68,10 @@ export interface IpcInvokeMap {
   [IPC_INVOKE.INDEX_GET_STATUS]: {
     args: [sessionId: string]
     result: IndexStatus
+  }
+  [IPC_INVOKE.WINDOW_TAKE_INITIAL_PATH]: {
+    args: []
+    result: string | null
   }
   [IPC_INVOKE.DIALOG_OPEN_FILE]: {
     args: []
